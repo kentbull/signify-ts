@@ -28,7 +28,7 @@
     "singleQuote": true,
     "trailingComma": "es5"
   },
-  "name": "signify-ts",
+  "name": "@kentbull/signify-ts",
   "author": "Phil Feairheller",
   "module": "dist/signify-ts.esm.js",
   "size-limit": [
@@ -74,5 +74,23 @@
     "ts-node": "^10.9.1",
     "urlsafe-base64": "^1.0.0",
     "xregexp": "^5.1.0"
-  }
+  },
+  "description": "Project Name: signify-ts",
+  "directories": {
+    "example": "examples",
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentbull/signify-ts.git"
+  },
+  "keywords": [
+    "keri",
+    "acdc",
+    "signify"
+  ],
+  "bugs": {
+    "url": "https://github.com/kentbull/signify-ts/issues"
+  },
+  "homepage": "https://github.com/kentbull/signify-ts#readme"
 }
