@@ -28,7 +28,7 @@
     "pretty": "prettier --write .",
     "pretty:check": "prettier --check ."
   },
-  "name": "signify-ts",
+  "name": "@kentbull/signify-ts",
   "author": "Phil Feairheller",
   "devDependencies": {
     "@mermaid-js/mermaid-cli": "^10.3.0",
@@ -63,5 +63,23 @@
   },
   "workspaces": [
     "examples/*"
-  ]
+  ],
+  "description": "Project Name: signify-ts",
+  "directories": {
+    "example": "examples",
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentbull/signify-ts.git"
+  },
+  "keywords": [
+    "keri",
+    "acdc",
+    "signify"
+  ],
+  "bugs": {
+    "url": "https://github.com/kentbull/signify-ts/issues"
+  },
+  "homepage": "https://github.com/kentbull/signify-ts#readme"
 }
