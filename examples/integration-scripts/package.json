@@ -5,7 +5,7 @@
   "version": "0.0.0",
   "scripts": {},
   "dependencies": {
-    "signify-ts": "file:../../",
+    "signify-ts": "file:../..",
     "ts-node": "^10.9.1"
   },
   "devDependencies": {

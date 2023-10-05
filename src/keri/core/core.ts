@@ -17,6 +17,10 @@ export class Version {
         this.major = major
         this.minor = minor
     }
+
+    public toString(): string {
+        return `Version(${this.major}, ${this.minor})`
+    }
 }
 
 export const Versionage = new Version()
@@ -106,7 +110,7 @@ export function deversify(versionString: string): [Ident, Serials, Version, stri
         if (!Object.values(Ident).includes(proto as Ident)) {
             throw new Error(`Invalid serialization kind = ${kind}`);
         }
-        
+
 
         let ta = kind as keyof typeof Serials
         kind = Serials[ta]

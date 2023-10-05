@@ -8,6 +8,7 @@ import { b, Dict, Ident, Ilks, Serials, versify, Versionage } from "../core/core
 import { Saider } from "../core/saider"
 import { Serder } from "../core/serder"
 import { TraitDex } from "./habery"
+import {Creder} from "../core/creder";
 
 
 /** Types of credentials */
@@ -18,9 +19,9 @@ export class CredentialTypes {
 
 /** Credential filter parameters */
 export interface CredentialFilter {
-    filter?: object, 
-    sort?: object[], 
-    skip?: number, 
+    filter?: object,
+    sort?: object[],
+    skip?: number,
     limit?: number
 }
 
@@ -31,7 +32,7 @@ export class Credentials {
     public client: SignifyClient
     /**
      * Credentials
-     * @param {SignifyClient} client 
+     * @param {SignifyClient} client
      */
     constructor(client: SignifyClient) {
         this.client = client
@@ -279,8 +280,8 @@ export class Credentials {
         return await res.json()
 
     }
-    
-    /** 
+
+    /**
     * Create a credential
     * @async
     * @param {any} name - Identifier
@@ -340,6 +341,7 @@ export class Credentials {
             cred.r = rules
         }
         const [, vc] = Saider.saidify(cred)
+        let creder = Creder.fromKed(vc)
 
         // Create iss
         let _iss = {
@@ -354,12 +356,13 @@ export class Credentials {
         }
 
         let [, iss] = Saider.saidify(_iss)
+        let iserder = new Serder(iss)
 
         // Create paths and sign
         let keeper = this.client!.manager!.get(hab)
 
         // Create ixn
-        let ixn = {}
+        let ixn: Serder;
         let sigs = []
 
         let state = hab.state
@@ -385,11 +388,11 @@ export class Credentials {
         } else {
             let ixnSerder = interact({ pre: pre, sn: sn + 1, data: data, dig: dig, version: undefined, kind: undefined })
             sigs = keeper.sign(b(ixnSerder.raw))
-            ixn = ixnSerder.ked
+            ixn = ixnSerder
         }
-        let res = await this.createFromEvents(name, vc, iss, ixn, sigs)
+        let res = await this.createFromEvents(name, vc, iss, ixn.ked, sigs)
 
-        return [ vc, iss, ixn, sigs, res]
+        return [ creder, iserder, ixn, sigs, res]
 
     }
 
@@ -413,18 +416,24 @@ export class Credentials {
 
     serialize(serder: Serder, anc: any) {
         let seqner = new Seqner({sn: anc.sn})
-        let couple = b(seqner.qb64b + anc.saider.qb64b)
-        let atc = new Uint8Array()
-        atc.set(new Counter({code:CtrDex.SealSourceCouples, count:1}).qb64b)
-        atc.set(couple)
+        let ancSaider = anc.saider
+        let seqb = seqner.qb64b
+        let ancb = ancSaider.qb64b
+        let ctr = new Counter({code:CtrDex.SealSourceCouples, count:1}).qb64b
+        let atc = new Uint8Array(ctr.length + seqb.length + ancb.length)
+        atc.set(ctr)
+        atc.set(seqb, ctr.length)
+        atc.set(ancb, ctr.length + seqb.length)
 
         if (atc.length % 4) {
             throw new Error(`Invalid attachments size=${atc.length}, nonintegral quadlets.`)
         }
         let pcnt = new Counter({code:CtrDex.AttachedMaterialQuadlets, count:(atc.length / 4)}).qb64b
-        let msg = b(serder.raw)
-        msg.set(pcnt)
-        msg.set(atc)
+        let bserder = b(serder.raw)
+        let msg = new Uint8Array(bserder.length + pcnt.length + atc.length)
+        msg.set(bserder)
+        msg.set(pcnt, bserder.length)
+        msg.set(atc, bserder.length + pcnt.length)
         return msg
     }
 }
@@ -433,7 +442,7 @@ export class Ipex {
     public client: SignifyClient
     /**
      * Ipex
-     * @param {SignifyClient} client 
+     * @param {SignifyClient} client
      */
     constructor(client: SignifyClient) {
         this.client = client
@@ -461,11 +470,11 @@ export class Ipex {
 }
 
 export interface CreateRegistryArgs {
-    name: string, 
-    registryName: string, 
+    name: string,
+    registryName: string,
     toad?: string | number | undefined
-    noBackers?:boolean, 
-    baks?:string[], 
+    noBackers?:boolean,
+    baks?:string[],
     nonce?:string
 }
 
@@ -508,7 +517,7 @@ export class Registries {
     public client: SignifyClient
     /**
      * Registries
-     * @param {SignifyClient} client 
+     * @param {SignifyClient} client
      */
     constructor(client: SignifyClient) {
         this.client = client
@@ -587,7 +596,7 @@ export class Registries {
         data[keeper.algo] = keeper.params()
 
         return this.client.fetch(path, method, data)
-        
+
     }
 
 }
@@ -598,7 +607,7 @@ export class Schemas {
     client: SignifyClient
     /**
      * Schemas
-     * @param {SignifyClient} client 
+     * @param {SignifyClient} client
      */
     constructor(client: SignifyClient) {
         this.client = client
