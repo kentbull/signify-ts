@@ -1,10 +1,11 @@
 import { strict as assert } from 'assert';
+// @ts-ignore
 import signify, {
     b,
+    Seqner,
     Counter,
     Credentials,
     CtrDex,
-    Seqner,
     Serder,
     SignifyClient,
 } from 'signify-ts';
@@ -12,15 +13,13 @@ import signify, {
 const url = 'http://127.0.0.1:3901';
 const boot_url = 'http://127.0.0.1:3903';
 
-//
-// refactor test to use smaller functions
-//
 // These witnesses should be running in the background with `kli witness demo`
 const wanWitAID = 'BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha';
 const wilWitAID = 'BLskRTInXnMxWaGqcpSyMgo0nYbalW99cGZESrz3zapM';
 const wesWitAID = 'BIKKuvBwpmDVA4Ds-EpL5bt9OqPzWPja2LigFYZN2YfX';
 const opWaitMs = 250; // milliseconds
 
+const holderAIDName = 'holder';
 const member1AIDName = 'member1';
 const member2AIDName = 'member2';
 const member3AIDName = 'member3';
@@ -79,6 +78,14 @@ async function issueCredentialMultisig() {
         aid2,
         aid3,
     });
+}
+
+async function setupHolder({ holderClient }: { holderClient: SignifyClient }) {
+    console.log(`holder client is ${holderClient}`);
+    // let icpResult1 = holderClient.identifiers().create(holderAIDName, {
+    //     toad: 3,
+    //     wits: [wanWitAID, wesWitAID, wilWitAID]
+    // })
 }
 
 async function createMultisigClients() {
@@ -1101,6 +1108,7 @@ async function issueCredentialWithMultisigAID({
 
     let registries = await client1.registries().list(member1AIDName);
 
+    console.log('Issuing Credential with AID1');
     let [cred, credIss, credIxn, redSigs, credRes] = await (
         client1 as SignifyClient
     )
@@ -1135,7 +1143,8 @@ async function issueCredentialWithMultisigAID({
         iss: iss,
         anc: signify.d(signify.messagize(credIxn, sigers)),
     };
-    let recp = [aid1['state'], aid2['state']].map((state) => state['i']);
+    let recp = [aid2['state'], aid3['state']].map((state) => state['i']);
+    console.log('sending issuance notification to participants');
     await client1
         .exchanges()
         .send(
@@ -1143,35 +1152,26 @@ async function issueCredentialWithMultisigAID({
             'credential',
             aid1,
             '/multisig/iss',
-            { gid: multisig, usage: 'Issue vLEIs' },
+            { gid: multisig },
             vembeds,
             recp
         );
-}
 
-// prettier-ignore
-
-function cred_serialize(serder: Serder, anc: any) {
-    let seqner = new Seqner({sn: anc.sn})
-    let ancSaider = anc.saider
-    let seqb = seqner.qb64b
-    let ancb = ancSaider.qb64b
-    let ctr = new Counter({code:CtrDex.SealSourceCouples, count:1}).qb64b
-    let atc = new Uint8Array(ctr.length + seqb.length + ancb.length)
-    atc.set(ctr)
-    atc.set(seqb, ctr.length)
-    atc.set(ancb, ctr.length + seqb.length)
-
-    if (atc.length % 4) {
-        throw new Error(`Invalid attachments size=${atc.length}, nonintegral quadlets.`)
+    // Member2 check for notifications and join the create registry event
+    let msgSaid = '';
+    while (msgSaid == '') {
+        let notifications = await client2.notifications().list();
+        for (let notif of notifications.notes) {
+            if (notif.a.r == '/multisig/iss') {
+                msgSaid = notif.a.d;
+                await client2.notifications().mark(notif.i);
+                console.log(
+                    'Member2 received exchange message to join the create registry event'
+                );
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, opWaitMs));
     }
-    let pcnt = new Counter({code:CtrDex.AttachedMaterialQuadlets, count:(atc.length / 4)}).qb64b
-    let bserder = b(serder.raw)
-    let msg = new Uint8Array(bserder.length + pcnt.length + atc.length)
-    msg.set(bserder)
-    msg.set(pcnt, bserder.length)
-    msg.set(atc, bserder.length + pcnt.length)
-    return msg
 }
 
 await issueCredentialMultisig();
