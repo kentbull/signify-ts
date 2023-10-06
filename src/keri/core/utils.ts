@@ -1,10 +1,11 @@
+import { Counter, CtrDex } from './counter';
 export function pad(n: any, width = 3, z = 0) {
     return (String(z).repeat(width) + String(n)).slice(String(n).length);
 }
 
 /**
  * @description  Returns list of depth first recursively extracted values from elements of
-    key event dict ked whose flabels are in lables list
+ key event dict ked whose flabels are in lables list
 
  * @param {*} ked  ked is key event dict
  * @param {*} labels    labels is list of element labels in ked from which to extract values
@@ -27,8 +28,8 @@ export function arrayEquals(ar1: Uint8Array, ar2: Uint8Array) {
 
 /**
  * @description   Recusive depth first search that recursively extracts value(s) from element
-    and appends to values list
-    Assumes that extracted values are str
+ and appends to values list
+ Assumes that extracted values are str
 
  * @param {*} element
  * @param {*} values
@@ -108,4 +109,21 @@ export function bytesToInt(ar: Uint8Array): number {
     }
 
     return value;
+}
+
+export function seralize(creder: any, prefixer: any, seqner: any, saider: any) {
+    let craw = creder.raw;
+    let ctr = new Counter({ code: CtrDex.SealSourceTriples, count: 1 }).qb64b;
+    let prefix = prefixer.qb64b;
+    let seq = seqner.qb64b;
+    let said = saider.qb64b;
+    let newCraw = new Uint8Array(
+        craw.length + ctr.length + prefix.length + seq.length + said.length
+    );
+    newCraw.set(craw);
+    newCraw.set(ctr, craw.length);
+    newCraw.set(prefix, craw.length + ctr.length);
+    newCraw.set(seq, craw.length + ctr.length + prefix.length);
+    newCraw.set(said, craw.length + ctr.length + prefix.length + seq.length);
+    return newCraw;
 }
