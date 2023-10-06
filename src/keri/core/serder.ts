@@ -10,6 +10,7 @@ import {
 } from './core';
 import { Verfer } from './verfer';
 import { Diger } from './diger';
+import { Saider } from './saider';
 
 export class Serder {
     private _kind: Serials;
@@ -111,6 +112,13 @@ export class Serder {
             digers.push(new Diger({ qb64: key }));
         }
         return digers;
+    }
+
+    get saider(): Saider {
+        const ked = this._ked ? this._ked : {};
+        //@ts-ignore
+        const [saider, sad] = Saider.saidify(ked);
+        return saider;
     }
 
     pretty() {

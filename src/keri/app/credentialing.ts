@@ -16,6 +16,7 @@ import {
 import { Saider } from '../core/saider';
 import { Serder } from '../core/serder';
 import { TraitDex } from './habery';
+import { Creder } from '../core/creder';
 
 /** Types of credentials */
 export class CredentialTypes {
@@ -372,6 +373,7 @@ export class Credentials {
             cred.r = rules;
         }
         const [, vc] = Saider.saidify(cred);
+        let vcCreder = Creder.fromKed(vc);
 
         // Create iss
         let _iss = {
@@ -390,7 +392,7 @@ export class Credentials {
         let keeper = this.client!.manager!.get(hab);
 
         // Create ixn
-        let ixn = {};
+        let ixn: Serder;
         let sigs = [];
 
         let state = hab.state;
@@ -423,11 +425,11 @@ export class Credentials {
                 kind: undefined,
             });
             sigs = keeper.sign(b(ixnSerder.raw));
-            ixn = ixnSerder.ked;
+            ixn = ixnSerder;
         }
-        let res = await this.createFromEvents(name, vc, iss, ixn, sigs);
+        let res = await this.createFromEvents(name, vc, iss, ixn.ked, sigs);
 
-        return [vc, iss, ixn, sigs, res];
+        return [vcCreder, iss, ixn, sigs, res];
     }
 
     async createFromEvents(
@@ -455,12 +457,15 @@ export class Credentials {
 
     serialize(serder: Serder, anc: any) {
         let seqner = new Seqner({ sn: anc.sn });
-        let couple = b(seqner.qb64b + anc.saider.qb64b);
-        let atc = new Uint8Array();
-        atc.set(
-            new Counter({ code: CtrDex.SealSourceCouples, count: 1 }).qb64b
-        );
-        atc.set(couple);
+        let ancSaider = anc.saider;
+        let seqb = seqner.qb64b;
+        let ancb = ancSaider.qb64b;
+        let ctr = new Counter({ code: CtrDex.SealSourceCouples, count: 1 })
+            .qb64b;
+        let atc = new Uint8Array(ctr.length + seqb.length + ancb.length);
+        atc.set(ctr);
+        atc.set(seqb, ctr.length);
+        atc.set(ancb, ctr.length + seqb.length);
 
         if (atc.length % 4) {
             throw new Error(
@@ -471,9 +476,11 @@ export class Credentials {
             code: CtrDex.AttachedMaterialQuadlets,
             count: atc.length / 4,
         }).qb64b;
-        let msg = b(serder.raw);
-        msg.set(pcnt);
-        msg.set(atc);
+        let bserder = b(serder.raw);
+        let msg = new Uint8Array(bserder.length + pcnt.length + atc.length);
+        msg.set(bserder);
+        msg.set(pcnt, bserder.length);
+        msg.set(atc, bserder.length + pcnt.length);
         return msg;
     }
 }
