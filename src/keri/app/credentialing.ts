@@ -794,4 +794,20 @@ export class Ipex {
                 grant
             );
     }
+
+    async submitAdmit(
+      name: string,
+      message: string,
+      sigs: string[],
+      atc: string,
+      recp: string[]): Promise<any> {
+        const path = `/identifiers/${name}/ipex/admit`
+        const admitExn = {
+            exn: message,
+            sigs: [...sigs],
+            atc: atc,
+            rec: [...recp]
+        }
+        return await this.client.fetch(path, 'POST', admitExn)
+    }
 }
