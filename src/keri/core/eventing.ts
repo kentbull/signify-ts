@@ -225,8 +225,8 @@ export function rotate({
             _toad && intive && _toad !== undefined && _toad <= MaxIntThold
                 ? _toad
                 : _toad.toString(16),
-        br: cuts,
-        ba: adds,
+        br: _cuts,
+        ba: _adds,
         a: data != undefined ? data : [],
     };
     const [, sad] = Saider.saidify(_sad);
