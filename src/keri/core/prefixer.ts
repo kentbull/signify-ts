@@ -131,7 +131,7 @@ export class Prefixer extends Matter {
             throw new Error(`Error extracting public key = ${e}`);
         }
 
-        if (verfer.code in [MtrDex.Ed25519]) {
+        if ([MtrDex.Ed25519].includes(verfer.code)) {
             throw new Error(`Mismatch derivation code = ${verfer.code}`);
         }
 
