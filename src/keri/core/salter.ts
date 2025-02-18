@@ -158,6 +158,20 @@ export class Salter extends Matter {
         });
     }
 
+    signers(
+      count = 1,
+      path = "",
+      code = MtrDex.Ed25519_Seed,
+      transferable = true,
+      start = 0,
+      tier = Tier.low,
+      temp = false): Signer[] {
+        return [...Array(count).keys()].map((i) => {
+            const indexedPath=`${path}${(i + start).toString(16)}`
+          return this.signer(code, transferable, indexedPath, tier, temp)
+        })
+    }
+
     get tier(): Tier | null {
         return this._tier;
     }

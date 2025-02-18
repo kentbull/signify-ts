@@ -98,14 +98,14 @@ export function rotate({
 
     let _nsith;
     if (nsith === undefined) {
-        _nsith = Math.max(1, Math.ceil(_ndigs.length / 2));
+        _nsith = Math.max(0, Math.ceil(_ndigs.length / 2));
     } else {
         _nsith = nsith;
     }
 
     const ntholder = new Tholder({ sith: _nsith });
-    if (ntholder.num != undefined && ntholder.num < 1) {
-        throw new Error(`Invalid sith = ${ntholder.num} less than 1.`);
+    if (ntholder.num != undefined && ntholder.num < 0) {
+        throw new Error(`Invalid sith = ${ntholder.num} less than 0.`);
     }
     if (ntholder.size > _ndigs.length) {
         // TODO this error should say that the threshold has not been met
@@ -225,8 +225,8 @@ export function rotate({
             _toad && intive && _toad !== undefined && _toad <= MaxIntThold
                 ? _toad
                 : _toad.toString(16),
-        br: cuts,
-        ba: adds,
+        br: _cuts,
+        ba: _adds,
         a: data != undefined ? data : [],
     };
     const [, sad] = Saider.saidify(_sad);

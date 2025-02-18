@@ -349,11 +349,20 @@ export class Matter {
         return this._raw;
     }
 
-    get qb64() {
+    /**
+     * Returns primitive formatted as fully qualified Base64 UTF-8 characters.
+     * Fully qualified means the raw primitive bytes pre-padded, as Base64 characters.
+     */
+    get qb64(): string {
         return this._infil();
     }
 
-    get qb64b() {
+    /**
+     * Returns primitive formatted as fully qualified Base64, UTF-8 bytes.
+     * Fully qualified means the raw primitive bytes pre-padded, as Base64 characters.
+     * These characters are formatted as UTF-8 bytes.
+     */
+    get qb64b(): Uint8Array {
         return b(this.qb64);
     }
 
@@ -385,9 +394,23 @@ export class Matter {
         return `${this.code}${intToB64(this.size, sizage!.ss)}`;
     }
 
-    private _infil() {
-        const code = this.code;
-        const size = this.size;
+    /**
+     * Returns fully qualified Base64 encoded bytes of the raw primitive bytes.
+     * Fully qualified means combining the derivation code and the raw primitive bytes
+     * with pad character stripped, specifically:
+     *   this.code + converted this.raw to Base64 with pad characters stripped.
+     * Pad characters ('A') are added to the raw primitive bytes to align on 24-bit boundaries.
+     * These pad characters are then replaced (stripped) as needed to make room for
+     * the derivation code.
+     *
+     * cs = hs + ss
+     * fs = (size * 4) + cs
+     *
+     * @private
+     */
+    private _infil(): string {
+        const code = this.code; // hard size codex value
+        const size = this.size; // size if variable length, None otherwise
         const raw = this.raw;
 
         const ps = (3 - (raw.length % 3)) % 3; // pad size chars or lead size bytes
@@ -447,6 +470,31 @@ export class Matter {
         }
     }
 
+    static sniffSize(ims: Buffer): number {
+        const first = String.fromCharCode(ims[0]);
+        if (!Array.from(Matter.Hards.keys()).includes(first)) {
+            throw new Error(`Unexpected Matter code ${first}`);
+        }
+
+        const hs = Matter.Hards.get(first)!;
+        if (ims.length < hs) {
+            throw new Error(`Need ${hs - ims.length} more characters.`);
+        }
+
+        const hard = d(new Uint8Array(ims.subarray(0, hs)));
+        if (!Array.from(Matter.Sizes.keys()).includes(hard)) {
+            throw new Error(`Unsupported Matter code ${hard}`);
+        }
+
+        const sizage = Matter.Sizes.get(hard)!;
+        return sizage.fs!;
+    }
+
+    /**
+     * Extracts the derivation code and raw primitive bytes from the fully qualified Base64 encoded bytes.
+     * @param qb64
+     * @private
+     */
     private _exfil(qb64: string) {
         if (qb64.length == 0) {
             throw new Error('Empty Material');

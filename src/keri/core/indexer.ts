@@ -407,6 +407,26 @@ export class Indexer {
         return full;
     }
 
+    static sniffSize(ims: Buffer): number {
+        const first = String.fromCharCode(ims[0]);
+        if (!Array.from(Indexer.Hards.keys()).includes(first)) {
+            throw new Error(`Unexpected Indexer code ${first}`);
+        }
+
+        const hs = Indexer.Hards.get(first)!;
+        if (ims.length < hs) {
+            throw new Error(`Need ${hs - ims.length} more characters.`);
+        }
+
+        const hard = d(new Uint8Array(ims.subarray(0, hs)));
+        if (!Array.from(Indexer.Sizes.keys()).includes(hard)) {
+            throw new Error(`Unsupported code ${hard}`);
+        }
+
+        const xizage = Indexer.Sizes.get(hard)!;
+        return xizage.fs!;
+    }
+
     _exfil(qb64: string) {
         if (qb64.length == 0) {
             throw new Error('Empty Material');
