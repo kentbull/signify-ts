@@ -1,15 +1,10 @@
-import { Serder } from "./serder.ts";
-import { d, deversify } from "./core.ts";
-import { Siger } from "./siger.ts";
-import { Cigar } from "./cigar.ts";
-import { Counter, CtrDex } from "./counter.ts";
-import { Indexer } from "./indexer.ts";
-import { Matter } from "./matter.ts";
-import { Verfer } from "./verfer.ts";
-import { Prefixer } from "./prefixer.ts";
-import { Seqner } from "./seqner.ts";
-import { Saider } from "./saider.ts";
-import { Pather } from "./pather.ts";
+import { Serder } from "./serder";
+import { d, deversify } from "./core";
+import { Siger } from "./siger";
+import { Cigar } from "./cigar";
+import { Counter, CtrDex_1_0 } from "./counter";
+import { Indexer } from "./indexer";
+import { Matter } from "./matter";
 
 /**
  * Cold start stream tritet codex.
@@ -150,12 +145,12 @@ export class CESRPrim {
 declare type CESRTupleType = (CESRPrim | CESRPrim[] | CESRTuple | CESRTuple[] | CESRAtcGroup)
 
 export class CESRTuple {
-    private _tuple: CESRTupleType[] = []
+    private _items: CESRTupleType[] = []
     constructor(tuple: CESRTupleType[]) {
-        this._tuple = tuple;
+        this._items = tuple;
     }
-    get tuple() {
-        return this._tuple;
+    get items() {
+        return this._items;
     }
 }
 
@@ -203,15 +198,29 @@ export class CESRAtcGroup {
  * An ordered sequence of CESR attachments that comes after a CESRBody.
  */
 export class CESRAttachments {
-    private _attachments: CESRAtcGroup[];
+    private _groups: CESRAtcGroup[];
+
+    /**
+     * A CESR attachment stream is a list of CESR groups and their cryptographic primitives.
+     * @param atcGroup
+     */
     constructor(atcGroup: CESRAtcGroup[]) {
-        this._attachments = atcGroup;
+        this._groups = atcGroup;
     }
-    get attachments() {
-        return this._attachments;
+
+    /**
+     * Groups of attachments. Each group has a count code and a list of cryptographic primitives
+     */
+    get groups() {
+        return this._groups;
     }
+
+    /**
+     * Adds an attachment group to the list of groups.
+     * @param atcGroup
+     */
     add(atcGroup: CESRAtcGroup) {
-        this._attachments.push(atcGroup);
+        this._groups.push(atcGroup);
     }
 }
 
@@ -283,7 +292,7 @@ export class Parser {
             ims = ims.subarray(Counter.Sizes.get(ctr.code)!.fs!);
 
             // strip off initial attachment count code
-            if (ctr.code === CtrDex.AttachedMaterialQuadlets) { // pipeline ctr?
+            if (ctr.code === CtrDex_1_0.AttachedMaterialQuadlets) { // pipeline ctr?
                 pipelined = true
                 // compute pipelined attached group size (pags) based on txt or bny
                 const pags = cold === Cold.txt ? ctr.count * 4 : ctr.count * 3
@@ -302,53 +311,52 @@ export class Parser {
             // process attachments
             const attachments = new CESRAttachments([]);
             let group: CESRAtcGroup;
-            let groups: CESRAtcGroup[];
             switch (ctr.code) {
-                case CtrDex.ControllerIdxSigs:
+                case CtrDex_1_0.ControllerIdxSigs:
                     [ims, group] = AtcParser.ControllerIdxSigs(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.WitnessIdxSigs:
+                case CtrDex_1_0.WitnessIdxSigs:
                     [ims, group] = AtcParser.WitnessIdxSigs(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.NonTransReceiptCouples:
+                case CtrDex_1_0.NonTransReceiptCouples:
                     [ims, group] = AtcParser.NonTransReceiptCouples(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.TransReceiptQuadruples:
+                case CtrDex_1_0.TransReceiptQuadruples:
                     [ims, group] = AtcParser.TransReceiptQuadruples(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.TransIdxSigGroups:
+                case CtrDex_1_0.TransIdxSigGroups:
                     [ims, group] = AtcParser.TransIdxSigGroups(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.TransLastIdxSigGroups:
+                case CtrDex_1_0.TransLastIdxSigGroups:
                     [ims, group] = AtcParser.TransLastIdxSigGroups(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.FirstSeenReplayCouples:
+                case CtrDex_1_0.FirstSeenReplayCouples:
                     [ims, group] = AtcParser.FirstSeenReplayCouples(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.SealSourceCouples:
+                case CtrDex_1_0.SealSourceCouples:
                     [ims, group] = AtcParser.SealSourceCouples(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.SealSourceTriples:
+                case CtrDex_1_0.SealSourceTriples:
                     [ims, group] = AtcParser.SealSourceTriples(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.SadPathSigGroup:
+                case CtrDex_1_0.RootSadPathSigGroups:
                     [ims, group] = AtcParser.SadPathSigGroup(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.SadPathSig:
+                case CtrDex_1_0.SadPathSigGroup:
                     [ims, group] = AtcParser.SadPathSig(ims, ctr);
                     attachments.add(group);
                     break;
-                case CtrDex.PathedMaterialQuadlets:
+                case CtrDex_1_0.PathedMaterialGroup:
                     [ims, group] = AtcParser.PathedMaterialQuadlets(ims, ctr, cold);
                     attachments.add(group);
                     break;
@@ -358,6 +366,75 @@ export class Parser {
 
             yield new CESRMessage(body, attachments);
         }
+    }
+
+    packGroup(group: CESRAtcGroup): Buffer {
+        // TODO handle pathed groups
+        let stream = Buffer.from([]);
+        stream = Buffer.concat([stream, group.counter.bytes]);
+
+        for (const item of group.items) {
+            if (item instanceof CESRPrim) {
+                stream = Buffer.concat([stream, item.bytes]);
+            }
+            else if (item instanceof CESRTuple) {
+                stream = Buffer.concat([stream, this.packTuple(item)]);
+            }
+        }
+        return stream;
+    }
+
+    packTuple(tuple: CESRTuple): Buffer  {
+        let stream = Buffer.from([]);
+        const items: CESRTupleType[] = tuple.items;
+        if (items.length === 0) return stream;
+        if (items.length === 1 && items[0] instanceof CESRPrim) {
+            return Buffer.concat([stream, items[0].bytes]);
+        }
+        for (const item of items) {
+            if (item instanceof CESRPrim) {
+                stream = Buffer.concat([stream, item.bytes]);
+            } else if (item instanceof CESRTuple) {
+                stream = Buffer.concat([stream, this.packTuple(item)]);
+            } else if (Array.isArray(item)) { // CESRPrim[] or CESRTuple[]
+                for(const subItem of item) {
+                    if (subItem instanceof CESRPrim) {
+                        stream = Buffer.concat([stream, subItem.bytes]);
+                    }
+                    else if (subItem instanceof CESRTuple) {
+                        stream = Buffer.concat([stream, this.packTuple(subItem)]);
+                    }
+                    else {
+                        throw new Error(`Parsing Error: Unknown item type ${typeof subItem}`)
+                    }
+                }
+            }
+            else if (item instanceof CESRAtcGroup) {
+                stream = Buffer.concat([stream, this.packGroup(item)]);
+            }
+            else {
+                throw new Error(`Parsing Error: Unknown item type ${typeof item}`)
+            }
+        }
+        return stream;
+    }
+
+    pack(msg: CESRMessage): Buffer {
+        // TODO handle pathed group
+        let stream = Buffer.from([]);
+        stream = Buffer.concat([stream, msg.body.bytes]); // body
+        for (const group of msg.atc.groups) { // attachments
+            stream = Buffer.concat([stream, group.counter.bytes])
+            for (const item of group.items) {
+                if (item instanceof CESRPrim) {
+                    stream = Buffer.concat([stream, item.bytes])
+                }
+                else if (item instanceof CESRTuple) {
+                    stream = Buffer.concat([stream, this.packTuple(item)]);
+                }
+            }
+        }
+        return stream;
     }
 
     sniff(ims: Buffer): Cold {
@@ -503,7 +580,7 @@ class AtcParser {
 
             const sigers: CESRPrim[] = [];
             const sigCtr = new Counter({qb64b: ims});
-            if (sigCtr.code !== CtrDex.ControllerIdxSigs) throw new Error(`Invalid group code. Expected ControllerIdxSigs (${CtrDex.ControllerIdxSigs}) got ${sigCtr.code}`);
+            if (sigCtr.code !== CtrDex_1_0.ControllerIdxSigs) throw new Error(`Invalid group code. Expected ControllerIdxSigs (${CtrDex_1_0.ControllerIdxSigs}) got ${sigCtr.code}`);
             ims = ims.subarray(Counter.Sizes.get(sigCtr.code)!.fs!);
             for (let j = 0; j < sigCtr.count; j++) {
                 size = Indexer.sniffSize(ims);
@@ -543,7 +620,7 @@ class AtcParser {
 
             const sigers: CESRPrim[] = [];
             const sigCtr = new Counter({qb64b: ims});
-            if (sigCtr.code !== CtrDex.ControllerIdxSigs) throw new Error(`Invalid group code. Expected ControllerIdxSigs (${CtrDex.ControllerIdxSigs}) got ${sigCtr.code}`);
+            if (sigCtr.code !== CtrDex_1_0.ControllerIdxSigs) throw new Error(`Invalid group code. Expected ControllerIdxSigs (${CtrDex_1_0.ControllerIdxSigs}) got ${sigCtr.code}`);
             ims = ims.subarray(Counter.Sizes.get(sigCtr.code)!.fs!);
             for (let j = 0; j < sigCtr.count; j++) {
                 size = Indexer.sniffSize(ims);
@@ -684,7 +761,7 @@ class AtcParser {
      * @param ctr count of subgroups within this sig group
      */
     static _sadPathSigGroup(ims: Buffer, ctr: Counter): [Buffer, CESRTuple[]] {
-      if (ctr.code !== CtrDex.SadPathSig)
+      if (ctr.code !== CtrDex_1_0.SadPathSigGroup)
           throw new Error(`Expected SadPathSig counter, got ${ctr.code}`);
 
       // get subpath
@@ -701,7 +778,7 @@ class AtcParser {
       const tuples: CESRTuple[] = [];
       let tuple: CESRTuple;
       switch (sctr.code) {
-          case CtrDex.TransIdxSigGroups:
+          case CtrDex_1_0.TransIdxSigGroups:
               [ims, group] = AtcParser.TransIdxSigGroups(ims, sctr);
               // TODO add each inner group to the outer group, maybe return a CESRGroup
               group.items.forEach((gTuple) => {
@@ -709,12 +786,12 @@ class AtcParser {
                   // tuple = sctr.code, (subpath, prefixer, seqner, saider, isigers)
                   tuple = new CESRTuple([
                     new CESRPrim(Buffer.from(sctr.qb64b), PrimType.Counter),
-                    new CESRTuple([subpath, ...((gTuple as CESRTuple).tuple)])
+                    new CESRTuple([subpath, ...((gTuple as CESRTuple).items)])
                   ]);
                   tuples.push(tuple)
               });
               break;
-          case CtrDex.ControllerIdxSigs:
+          case CtrDex_1_0.ControllerIdxSigs:
               [ims, group] = AtcParser.ControllerIdxSigs(ims, sctr);
               // tuple = sctr.code, (subpath, isigers)
               tuple = new CESRTuple([
@@ -723,7 +800,7 @@ class AtcParser {
               ])
               tuples.push(tuple)
               break;
-          case CtrDex.NonTransReceiptCouples:
+          case CtrDex_1_0.NonTransReceiptCouples:
               [ims, group] = AtcParser.NonTransReceiptCouples(ims, sctr);
               group.items.forEach((gTuple) => {
                 // tuple = sctr.code, (subpath, cigar)
@@ -731,7 +808,7 @@ class AtcParser {
                 // TODO note for parsing: remember to combine the verfer to cigar.verfer
                 tuple = new CESRTuple([
                     new CESRPrim(Buffer.from(sctr.qb64b), PrimType.Counter),
-                    new CESRTuple([subpath, ...((gTuple as CESRTuple).tuple)])
+                    new CESRTuple([subpath, ...((gTuple as CESRTuple).items)])
                 ])
                 tuples.push(tuple);
               });
@@ -762,5 +839,17 @@ class AtcParser {
         const group = new CESRAtcGroup(ctr.code, [prim],
           new CESRPrim(Buffer.from(ctr.qb64b), PrimType.Counter));
         return [ims, group];
+    }
+}
+
+
+
+class Hydrator {
+    constructor() {
+
+    }
+
+    hydrate(cesrMessage: CESRMessage) {
+
     }
 }
