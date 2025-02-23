@@ -5,7 +5,14 @@ import { b, d } from './core';
 import { Buffer } from 'buffer';
 import { decodeBase64Url, encodeBase64Url } from './base64';
 
+/**
+ * Codex is a class that provides a mapping of property names to their corresponding values.
+ */
 export class Codex {
+    /**
+     * Returns true if the given property is a member of the codex.
+     * @param prop
+     */
     has(prop: string): boolean {
         const m = new Map(
             Array.from(Object.entries(this), (v) => [v[1], v[0]])

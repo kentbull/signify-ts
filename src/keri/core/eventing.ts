@@ -17,7 +17,7 @@ import { MtrDex, NonTransDex } from './matter';
 import { Saider } from './saider';
 import { Siger } from './siger';
 import { Cigar } from './cigar';
-import { Counter, CtrDex } from './counter';
+import { Counter, CtrDex_1_0 } from './counter';
 import { Seqner } from './seqner';
 
 const MaxIntThold = 2 ** 32 - 1;
@@ -432,7 +432,7 @@ export function messagize(
             if (seal[0] == 'SealEvent') {
                 atc = concat(
                     atc,
-                    new Counter({ code: CtrDex.TransIdxSigGroups, count: 1 })
+                    new Counter({ code: CtrDex_1_0.TransIdxSigGroups, count: 1 })
                         .qb64b
                 );
                 atc = concat(atc, new TextEncoder().encode(seal[1].i));
@@ -445,7 +445,7 @@ export function messagize(
                 atc = concat(
                     atc,
                     new Counter({
-                        code: CtrDex.TransLastIdxSigGroups,
+                        code: CtrDex_1_0.TransLastIdxSigGroups,
                         count: 1,
                     }).qb64b
                 );
@@ -456,7 +456,7 @@ export function messagize(
         atc = concat(
             atc,
             new Counter({
-                code: CtrDex.ControllerIdxSigs,
+                code: CtrDex_1_0.ControllerIdxSigs,
                 count: sigers.length,
             }).qb64b
         );
@@ -469,7 +469,7 @@ export function messagize(
         atc = concat(
             atc,
             new Counter({
-                code: CtrDex.ControllerIdxSigs,
+                code: CtrDex_1_0.ControllerIdxSigs,
                 count: wigers.length,
             }).qb64b
         );
@@ -488,7 +488,7 @@ export function messagize(
         atc = concat(
             atc,
             new Counter({
-                code: CtrDex.ControllerIdxSigs,
+                code: CtrDex_1_0.ControllerIdxSigs,
                 count: cigars.length,
             }).qb64b
         );
@@ -512,7 +512,7 @@ export function messagize(
         msg = concat(
             msg,
             new Counter({
-                code: CtrDex.AttachedMaterialQuadlets,
+                code: CtrDex_1_0.AttachedMaterialQuadlets,
                 count: Math.floor(atc.length / 4),
             }).qb64b
         );

@@ -1,4 +1,4 @@
-import { Counter, CtrDex } from './counter';
+import { Counter, CtrDex_1_0 } from './counter';
 import { Seqner } from './seqner';
 import { Prefixer } from './prefixer';
 import { Saider } from './saider';
@@ -120,7 +120,7 @@ export function serializeACDCAttachment(anc: Serder): Uint8Array {
     const seqner = new Seqner({ sn: anc.sn });
     const saider = new Saider({ qb64: anc.sad['d'] });
     const craw = new Uint8Array();
-    const ctr = new Counter({ code: CtrDex.SealSourceTriples, count: 1 }).qb64b;
+    const ctr = new Counter({ code: CtrDex_1_0.SealSourceTriples, count: 1 }).qb64b;
     const prefix = prefixer.qb64b;
     const seq = seqner.qb64b;
     const said = saider.qb64b;
@@ -144,7 +144,7 @@ export function serializeIssExnAttachment(anc: Serder): Uint8Array {
     coupleArray.set(seqner.qb64b);
     coupleArray.set(ancSaider.qb64b, seqner.qb64b.length);
     const counter = new Counter({
-        code: CtrDex.SealSourceCouples,
+        code: CtrDex_1_0.SealSourceCouples,
         count: 1,
     });
     const counterQb64b = counter.qb64b;
@@ -158,7 +158,7 @@ export function serializeIssExnAttachment(anc: Serder): Uint8Array {
         );
     }
     const pcnt = new Counter({
-        code: CtrDex.AttachedMaterialQuadlets,
+        code: CtrDex_1_0.AttachedMaterialQuadlets,
         count: Math.floor(atc.length / 4),
     });
     const msg = new Uint8Array(pcnt.qb64b.length + atc.length);

@@ -3,7 +3,7 @@ import { b, d, Dict, Protocols, Ilks, Serials, versify } from '../core/core';
 import { Serder } from '../core/serder';
 import { nowUTC } from '../core/utils';
 import { Pather } from '../core/pather';
-import { Counter, CtrDex } from '../core/counter';
+import { Counter, CtrDex_1_0 } from '../core/counter';
 import { Saider } from '../core/saider';
 import { HabState } from '../core/keyState';
 
@@ -181,7 +181,7 @@ export function exchange(
         pathed += atc;
 
         const counter = new Counter({
-            code: CtrDex.PathedMaterialQuadlets,
+            code: CtrDex_1_0.PathedMaterialGroup,
             count: Math.floor(pathed.length / 4),
         });
         end += counter.qb64;

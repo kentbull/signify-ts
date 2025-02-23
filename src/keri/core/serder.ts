@@ -12,7 +12,7 @@ import {
 import { Verfer } from './verfer';
 import { Diger } from './diger';
 import { CesrNumber } from './number';
-import { Tholder } from "./tholder.ts";
+import { Tholder } from "./tholder";
 
 export class Serder {
     protected _kind: Serials;
