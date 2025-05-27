@@ -67,8 +67,8 @@ describe('Parser', () => {
           +`"d":"EIcca2-uqsicYK7-q5gxlZXuzOkqrNSL3JIaLflSOOgF",`
           +`"i":"DNG2arBDtHK_JyHRAq-emRdC6UM-yIpCAeJIWDiXp4Hx",`
           +`"s":"0",`
-          +`"kt":"1","k":["DNG2arBDtHK_JyHRAq-emRdC6UM-yIpCAeJIWDiXp4Hx"],`
-          +`"nt":"1","n":["EFXIx7URwmw7AVQTBcMxPXfOOJ2YYA1SJAam69DXV8D2"],`
+          +`"kt":"1","k":["DNG2arBDtHK_JyHRAq-emRdC6UM-yIpCAeJIWDiXp4Hx"],` // isith, icount
+          +`"nt":"1","n":["EFXIx7URwmw7AVQTBcMxPXfOOJ2YYA1SJAam69DXV8D2"],` // nsith, ncount
           +`"bt":"0","b":[],"c":[],"a":[]}`
           +`-AABAAApXLez5eVIs6YyRXOMDMBy4cTm2GvsilrZlcMmtBbO5twLst_jjFoEyfKTWKntEtv9JPBv1DLkqg-ImDmGPM8E`;
 
@@ -316,7 +316,7 @@ describe('Parser', () => {
 
         // test that parsing works
         const cesrMsgs: CESRMessage[] = [];
-        for (const msg of parser.parse(msgs)) {
+        for (const msg of parser.msgParsator(msgs)) {
             if (msg) {
                 cesrMsgs.push(msg);
             }

@@ -252,7 +252,7 @@ export class CESRMessage {
 export class Parser {
     constructor() {}
 
-    *parse(
+    *msgParsator(
         ims: Buffer,
         framed = false,
         pipeline = false
