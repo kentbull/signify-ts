@@ -11,25 +11,39 @@ export interface CounterArgs {
     strip?: boolean;
 }
 
-export class CounterCodex extends Codex {
+/**
+ * CounterCodex is codex hard (stable) part of all counter derivation codes.
+ * Only provide defined codes.
+ * Undefined are left out so that inclusion(exclusion) via 'in' operator works.
+ */
+export class CounterCodex_1_0 extends Codex {
     public ControllerIdxSigs: string = '-A'; // Qualified Base64 Indexed Signature.
     public WitnessIdxSigs: string = '-B'; // Qualified Base64 Indexed Signature.
     public NonTransReceiptCouples: string = '-C'; // Composed Base64 Couple, pre+cig.
     public TransReceiptQuadruples: string = '-D'; // Composed Base64 Quadruple, pre+snu+dig+sig.
     public FirstSeenReplayCouples: string = '-E'; // Composed Base64 Couple, fnu+dts.
     public TransIdxSigGroups: string = '-F'; // Composed Base64 Group, pre+snu+dig+ControllerIdxSigs group.
-    public SealSourceCouples: string = '-G'; // Composed Base64 couple, snu+dig of given delegators or issuers event
+    public SealSourceCouples: string = '-G'; // Composed Base64 couple, snu+dig of given delegator/issuer/transaction event
     public TransLastIdxSigGroups: string = '-H'; // Composed Base64 Group, pre+ControllerIdxSigs group.
     public SealSourceTriples: string = '-I'; // Composed Base64 triple, pre+snu+dig of anchoring source event
-    public SadPathSig: string = '-J'; // Composed Base64 Group path+TransIdxSigGroup of SAID of content
-    public SadPathSigGroup: string = '-K'; // Composed Base64 Group, root(path)+SaidPathCouples
-    public PathedMaterialQuadlets: string = '-L'; // Composed Grouped Pathed Material Quadlet (4 char each)
+    public SadPathSigGroup: string = '-J'; // Composed Base64 Group path+TransIdxSigGroup of SAID of content
+    public RootSadPathSigGroups: string = '-K'; // Composed Base64 Group, root(path)+SaidPathCouples
+    public PathedMaterialGroup: string = '-L'; // Composed Grouped Pathed Material Quadlet (4 char each)
+    public BigPathedMaterialGroup: string = '-0L'; // Composed Grouped Pathed Material Quadlet (4 char each)
     public AttachedMaterialQuadlets: string = '-V'; // Composed Grouped Attached Material Quadlet (4 char each)
     public BigAttachedMaterialQuadlets: string = '-0V'; // Composed Grouped Attached Material Quadlet (4 char each)
-    public KERIProtocolStack: string = '--AAA'; // KERI ACDC Protocol Stack CESR Version
+    public ESSRPayloadGroup: string = '-Z'; // ESSR Payload Group, dig of content+Texter group
+    public KERIACDCGenusVersion: string = '--AAA'; // KERI ACDC Protocol Stack CESR Version
 }
 
-export const CtrDex = new CounterCodex();
+/**
+ * Instantiation of version 1 of the CESR count code types allowing set membership checks with .has().
+ */
+export const CtrDex_1_0 = new CounterCodex_1_0();
+
+export class CounterCodex_2_0 extends Codex {
+    // TODO copy from KERIpy
+}
 
 export class Counter {
     static Sizes = new Map(

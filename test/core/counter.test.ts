@@ -1,4 +1,4 @@
-import { Counter, CtrDex } from '../../src/keri/core/counter';
+import { Counter, CtrDex_1_0 } from '../../src/keri/core/counter';
 import { strict as assert } from 'assert';
 import { b, b64ToInt, intToB64 } from '../../src/keri/core/core';
 
@@ -37,24 +37,24 @@ describe('int to b64 and back', () => {
         });
 
         let count = 1;
-        let qsc = CtrDex.ControllerIdxSigs + intToB64(count, 2);
+        let qsc = CtrDex_1_0.ControllerIdxSigs + intToB64(count, 2);
         assert.equal(qsc, '-AAB');
         let qscb = b(qsc);
 
-        let counter = new Counter({ code: CtrDex.ControllerIdxSigs }); // default count = 1
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        let counter = new Counter({ code: CtrDex_1_0.ControllerIdxSigs }); // default count = 1
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64: qsc }); // default count = 1
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64b: qscb }); // default count = 1
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
@@ -69,51 +69,51 @@ describe('int to b64 and back', () => {
         });
 
         count = 5;
-        qsc = CtrDex.ControllerIdxSigs + intToB64(count, 2);
+        qsc = CtrDex_1_0.ControllerIdxSigs + intToB64(count, 2);
         assert.equal(qsc, '-AAF');
         qscb = b(qsc);
 
-        counter = new Counter({ code: CtrDex.ControllerIdxSigs, count: count });
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        counter = new Counter({ code: CtrDex_1_0.ControllerIdxSigs, count: count });
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64: qsc }); // default count = 1
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64b: qscb }); // default count = 1
-        assert.equal(counter.code, CtrDex.ControllerIdxSigs);
+        assert.equal(counter.code, CtrDex_1_0.ControllerIdxSigs);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         // test with big codes index=1024
         count = 1024;
-        qsc = CtrDex.BigAttachedMaterialQuadlets + intToB64(count, 5);
+        qsc = CtrDex_1_0.BigAttachedMaterialQuadlets + intToB64(count, 5);
         assert.equal(qsc, '-0VAAAQA');
         qscb = b(qsc);
 
         counter = new Counter({
-            code: CtrDex.BigAttachedMaterialQuadlets,
+            code: CtrDex_1_0.BigAttachedMaterialQuadlets,
             count: count,
         });
-        assert.equal(counter.code, CtrDex.BigAttachedMaterialQuadlets);
+        assert.equal(counter.code, CtrDex_1_0.BigAttachedMaterialQuadlets);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64: qsc }); // default count = 1
-        assert.equal(counter.code, CtrDex.BigAttachedMaterialQuadlets);
+        assert.equal(counter.code, CtrDex_1_0.BigAttachedMaterialQuadlets);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
 
         counter = new Counter({ qb64b: qscb }); // default count = 1
-        assert.equal(counter.code, CtrDex.BigAttachedMaterialQuadlets);
+        assert.equal(counter.code, CtrDex_1_0.BigAttachedMaterialQuadlets);
         assert.equal(counter.count, count);
         assert.deepStrictEqual(counter.qb64b, qscb);
         assert.equal(counter.qb64, qsc);
@@ -122,15 +122,15 @@ describe('int to b64 and back', () => {
         const version = intToB64(verint, 3);
         assert.equal(version, 'AAA');
         assert.equal(verint, b64ToInt(version));
-        qsc = CtrDex.KERIProtocolStack + version;
+        qsc = CtrDex_1_0.KERIACDCGenusVersion + version;
         assert.equal(qsc, '--AAAAAA'); // keri Cesr version 0.0.0
         qscb = b(qsc);
 
         counter = new Counter({
-            code: CtrDex.KERIProtocolStack,
+            code: CtrDex_1_0.KERIACDCGenusVersion,
             count: verint,
         });
-        assert.equal(counter.code, CtrDex.KERIProtocolStack);
+        assert.equal(counter.code, CtrDex_1_0.KERIACDCGenusVersion);
         assert.equal(counter.count, verint);
         assert.equal(counter.countToB64(3), version);
         assert.equal(counter.countToB64(), version); // default length

@@ -225,6 +225,7 @@ export function deversify(
         const pa = proto as keyof typeof Protocols;
         proto = Protocols[pa];
 
+        // TODO change order of return to match the order of KERIpy: proto, vrsn, kind, size
         return [proto, kind, version, size];
     }
     throw new Error(`Invalid version string = ${versionString}`);
@@ -235,13 +236,13 @@ export function deversify(
  * protocol version, serialization type, and raw byte size of the serialization.
  *
  * Defaults to version 1.0.
- * @param ident
+ * @param proto
  * @param version
  * @param kind
  * @param size
  */
 export function versify(
-    ident: Protocols = Protocols.KERI,
+    proto: Protocols = Protocols.KERI,
     version?: Version,
     kind: Serials = Serials.JSON,
     size: number = 0
@@ -252,7 +253,7 @@ export function versify(
     // raw size in hex digits zero padded to 6 characters
     const rawSize = size.toString(16).padStart(6, '0');
     const terminationChar = '_'; // v1 termination character
-    return `${ident}${major}${minor}${kind}${rawSize}${terminationChar}`;
+    return `${proto}${major}${minor}${kind}${rawSize}${terminationChar}`;
 }
 
 /**
