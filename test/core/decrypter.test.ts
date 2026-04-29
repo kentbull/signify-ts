@@ -165,5 +165,35 @@ describe('Decrypter', () => {
         desalter = decrypter.decrypt(saltcipher.qb64b);
         assert.deepStrictEqual(desalter.qb64b, saltqb64b);
         assert.equal(desalter.code, MtrDex.Salt_128);
+
+        const streamSaltCipher = encrypter.encrypt(
+            saltqb64b,
+            null,
+            MtrDex.X25519_Cipher_L0
+        );
+        assert.equal(streamSaltCipher.code, MtrDex.X25519_Cipher_L0);
+        desalter = decrypter.decrypt(streamSaltCipher.qb64b);
+        assert.deepStrictEqual(desalter.qb64b, saltqb64b);
+        assert.equal(desalter.code, MtrDex.Salt_128);
+
+        const streamSeedCipher = encrypter.encrypt(
+            seedqb64b,
+            null,
+            MtrDex.X25519_Cipher_L0
+        );
+        assert.ok(
+            [
+                MtrDex.X25519_Cipher_L0,
+                MtrDex.X25519_Cipher_L1,
+                MtrDex.X25519_Cipher_L2,
+            ].includes(streamSeedCipher.code)
+        );
+        designer = decrypter.decrypt(
+            streamSeedCipher.qb64b,
+            null,
+            signer.verfer.transferable
+        );
+        assert.deepStrictEqual(designer.qb64b, seedqb64b);
+        assert.equal(designer.code, MtrDex.Ed25519_Seed);
     });
 });

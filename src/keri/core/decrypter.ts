@@ -2,7 +2,7 @@ import libsodium from 'libsodium-wrappers-sumo';
 
 import { Matter, MatterArgs, MtrDex } from './matter.ts';
 import { Signer } from './signer.ts';
-import { Cipher } from './cipher.ts';
+import { Cipher, X25519_CIPHER_STREAM_CODES } from './cipher.ts';
 import { EmptyMaterialError } from './kering.ts';
 import { Salter } from './salter.ts';
 
@@ -73,8 +73,26 @@ export class Decrypter extends Matter {
             return new Salter({ qb64b: plain });
         } else if (cipher.code == MtrDex.X25519_Cipher_Seed) {
             return new Signer({ qb64b: plain, transferable: transferable });
+        } else if (
+            Array.from(X25519_CIPHER_STREAM_CODES).includes(cipher.code)
+        ) {
+            return primitiveFromSniffableStream(plain, transferable);
         } else {
             throw new Error(`Unsupported cipher text code == ${cipher.code}`);
         }
     }
 }
+
+const primitiveFromSniffableStream = (
+    plain: Uint8Array,
+    transferable: boolean
+): Salter | Signer => {
+    const text = new TextDecoder().decode(plain);
+    if (text.startsWith(MtrDex.Ed25519_Seed)) {
+        return new Signer({ qb64b: plain, transferable });
+    }
+    if (text.startsWith(MtrDex.Salt_128)) {
+        return new Salter({ qb64b: plain });
+    }
+    throw new Error(`Unsupported decrypted stream code ${text.slice(0, 4)}`);
+};

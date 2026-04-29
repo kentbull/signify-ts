@@ -1,6 +1,6 @@
 import { EmptyMaterialError } from './kering.ts';
 
-import { intToB64, readInt } from './core.ts';
+import { b64ToInt, intToB64, readInt } from './core.ts';
 import { b, d } from './core.ts';
 import { decodeBase64Url, encodeBase64Url } from './base64.ts';
 
@@ -40,6 +40,12 @@ export class MatterCodex extends Codex {
     StrB64_Big_L0: string = '7AAA'; // String Base64 Only Big Lead Size 0
     StrB64_Big_L1: string = '8AAA'; // String Base64 Only Big Lead Size 1
     StrB64_Big_L2: string = '9AAA'; // String Base64 Only Big Lead Size 2
+    X25519_Cipher_L0: string = '4C'; // X25519 sealed box cipher bytes of sniffable stream plaintext lead size 0
+    X25519_Cipher_L1: string = '5C'; // X25519 sealed box cipher bytes of sniffable stream plaintext lead size 1
+    X25519_Cipher_L2: string = '6C'; // X25519 sealed box cipher bytes of sniffable stream plaintext lead size 2
+    X25519_Cipher_Big_L0: string = '7AAC'; // X25519 sealed box cipher bytes of sniffable stream plaintext big lead size 0
+    X25519_Cipher_Big_L1: string = '8AAC'; // X25519 sealed box cipher bytes of sniffable stream plaintext big lead size 1
+    X25519_Cipher_Big_L2: string = '9AAC'; // X25519 sealed box cipher bytes of sniffable stream plaintext big lead size 2
 }
 
 export const MtrDex = new MatterCodex();
@@ -179,6 +185,12 @@ export class Matter {
             '7AAB': new Sizage(4, 4, undefined, 0),
             '8AAB': new Sizage(4, 4, undefined, 1),
             '9AAB': new Sizage(4, 4, undefined, 2),
+            '4C': new Sizage(2, 2, undefined, 0),
+            '5C': new Sizage(2, 2, undefined, 1),
+            '6C': new Sizage(2, 2, undefined, 2),
+            '7AAC': new Sizage(4, 4, undefined, 0),
+            '8AAC': new Sizage(4, 4, undefined, 1),
+            '9AAC': new Sizage(4, 4, undefined, 2),
         })
     );
 
@@ -416,7 +428,7 @@ export class Matter {
                 bytes[i] = 0;
             }
             for (let i = 0; i < raw.length; i++) {
-                const odx = i + ps;
+                const odx = i + sizage!.ls!;
                 bytes[odx] = raw[i];
             }
 
@@ -469,45 +481,30 @@ export class Matter {
         const sizage = Matter.Sizes.get(hard);
         const cs = sizage!.hs + sizage!.ss;
         let size = -1;
-        if (sizage!.fs == -1) {
-            // Variable size code, Not supported
-            throw new Error('Variable size codes not supported yet');
+        let fullSize: number;
+        if (sizage!.fs === undefined) {
+            const soft = qb64.slice(sizage!.hs, cs);
+            size = b64ToInt(soft);
+            fullSize = cs + size * 4;
         } else {
             size = sizage!.fs!;
+            fullSize = sizage!.fs!;
         }
 
-        if (qb64.length < sizage!.fs!) {
-            throw new Error(`Need ${sizage!.fs! - qb64.length} more chars.`);
+        if (qb64.length < fullSize) {
+            throw new Error(`Need ${fullSize - qb64.length} more chars.`);
         }
 
-        qb64 = qb64.slice(0, sizage!.fs);
+        qb64 = qb64.slice(0, fullSize);
         const ps = cs % 4;
-        const pbs = 2 * (ps == 0 ? sizage!.ls! : ps);
-        let raw;
-        if (ps != 0) {
-            const base = new Array(ps + 1).join('A') + qb64.slice(cs);
-            const paw = Uint8Array.from(decodeBase64Url(base)); // decode base to leave prepadded raw
-            const pi = readInt(paw.subarray(0, ps)); // prepad as int
-            if (pi & (2 ** pbs - 1)) {
-                // masked pad bits non-zero
-                throw new Error(
-                    `Non zeroed prepad bits = {pi & (2 ** pbs - 1 ):<06b} in {qb64b[cs:cs+1]}.`
-                );
-            }
-            raw = paw.subarray(ps); // strip off ps prepad paw bytes
-        } else {
-            const base = qb64.slice(cs);
-            const paw = Uint8Array.from(decodeBase64Url(base));
-            const li = readInt(paw.subarray(0, sizage!.ls));
-            if (li != 0) {
-                if (li == 1) {
-                    throw new Error(`Non zeroed lead byte = 0x{li:02x}.`);
-                } else {
-                    throw new Error(`Non zeroed lead bytes = 0x{li:04x}`);
-                }
-            }
-            raw = paw.subarray(sizage!.ls);
+        const base = new Array(ps + 1).join('A') + qb64.slice(cs);
+        const paw = Uint8Array.from(decodeBase64Url(base));
+        const leadSize = ps + sizage!.ls!;
+        const pi = readInt(paw.subarray(0, leadSize));
+        if (pi != 0) {
+            throw new Error(`Non zeroed lead bytes = 0x${pi.toString(16)}`);
         }
+        const raw = paw.subarray(leadSize);
 
         this._code = hard; // hard only
         this._size = size;

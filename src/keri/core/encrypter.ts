@@ -44,7 +44,11 @@ export class Encrypter extends Matter {
         return arrayEquals(pubkey, this.raw);
     }
 
-    encrypt(ser: Uint8Array | null = null, matter: Matter | null = null) {
+    encrypt(
+        ser: Uint8Array | null = null,
+        matter: Matter | null = null,
+        code: string | undefined = undefined
+    ) {
         if (ser == null && matter == null) {
             throw new Error('Neither ser nor matter are provided.');
         }
@@ -53,7 +57,9 @@ export class Encrypter extends Matter {
             matter = new Matter({ qb64b: ser });
         }
 
-        let code;
+        if (code !== undefined) {
+            return this._encrypt(matter!.qb64b, this.raw, code);
+        }
         if (matter!.code == MtrDex.Salt_128) {
             code = MtrDex.X25519_Cipher_Salt;
         } else {

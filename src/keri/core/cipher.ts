@@ -1,6 +1,26 @@
 import { Matter, MatterArgs, MtrDex } from './matter.ts';
 import { Decrypter } from './decrypter.ts';
 
+export const X25519_CIPHER_CODES = [
+    MtrDex.X25519_Cipher_Salt,
+    MtrDex.X25519_Cipher_Seed,
+    MtrDex.X25519_Cipher_L0,
+    MtrDex.X25519_Cipher_L1,
+    MtrDex.X25519_Cipher_L2,
+    MtrDex.X25519_Cipher_Big_L0,
+    MtrDex.X25519_Cipher_Big_L1,
+    MtrDex.X25519_Cipher_Big_L2,
+] as const;
+
+export const X25519_CIPHER_STREAM_CODES = [
+    MtrDex.X25519_Cipher_L0,
+    MtrDex.X25519_Cipher_L1,
+    MtrDex.X25519_Cipher_L2,
+    MtrDex.X25519_Cipher_Big_L0,
+    MtrDex.X25519_Cipher_Big_L1,
+    MtrDex.X25519_Cipher_Big_L2,
+] as const;
+
 export class Cipher extends Matter {
     constructor({ raw, code, qb64, qb64b, qb2 }: MatterArgs) {
         if (raw != undefined && code == undefined) {
@@ -14,12 +34,7 @@ export class Cipher extends Matter {
         }
         super({ raw: raw, code: code, qb64b: qb64b, qb64: qb64, qb2: qb2 });
 
-        if (
-            !Array.from([
-                MtrDex.X25519_Cipher_Salt,
-                MtrDex.X25519_Cipher_Seed,
-            ]).includes(this.code)
-        ) {
+        if (!Array.from(X25519_CIPHER_CODES).includes(this.code)) {
             throw new Error(`Unsupported Cipher code == ${this.code}`);
         }
     }
