@@ -149,6 +149,19 @@ describe('Aiding', () => {
         assert.equal(lastCall.path, '/identifiers/a%20name%20with%20%C3%B1!');
     });
 
+    it('Does not pre-encode identifier names when getting did:webs DIDs', async () => {
+        client.fetch.mockResolvedValue(
+            Response.json({ dws: 'did:webs:example:dws:aid1' })
+        );
+
+        const dws = await client.identifiers().dws('aid:name with ñ!');
+        const lastCall = client.getLastMockRequest();
+
+        assert.equal(dws, 'did:webs:example:dws:aid1');
+        assert.equal(lastCall.method, 'GET');
+        assert.equal(lastCall.path, '/identifiers/aid:name with ñ!/dws');
+    });
+
     it('Can create salty AID with multiple signatures', async () => {
         client.fetch.mockResolvedValue(Response.json({}));
 
