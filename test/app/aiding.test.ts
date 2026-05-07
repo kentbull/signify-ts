@@ -149,6 +149,22 @@ describe('Aiding', () => {
         assert.equal(lastCall.path, '/identifiers/a%20name%20with%20%C3%B1!');
     });
 
+    it('Can get an identifier did:webs DID', async () => {
+        client.fetch.mockResolvedValue(
+            Response.json({ dws: 'did:webs:example:dws:aid1' })
+        );
+
+        const dws = await client.identifiers().dws('a name with ñ!');
+        const lastCall = client.getLastMockRequest();
+
+        assert.equal(dws, 'did:webs:example:dws:aid1');
+        assert.equal(lastCall.method, 'GET');
+        assert.equal(
+            lastCall.path,
+            '/identifiers/a%20name%20with%20%C3%B1!/dws'
+        );
+    });
+
     it('Can create salty AID with multiple signatures', async () => {
         client.fetch.mockResolvedValue(Response.json({}));
 

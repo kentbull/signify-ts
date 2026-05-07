@@ -10,11 +10,13 @@ import { Agent, Controller } from './controller.ts';
 import { Oobis, Operations, KeyEvents, KeyStates, Config } from './coring.ts';
 import { Credentials, Ipex, Registries, Schemas } from './credentialing.ts';
 import { Delegations } from './delegating.ts';
+import { DidWebs } from './didwebing.ts';
 import { Escrows } from './escrowing.ts';
 import { Exchanges } from './exchanging.ts';
 import { Groups } from './grouping.ts';
 import { Notifications } from './notifying.ts';
 import { AgentSignals } from './signaling.ts';
+import { W3C } from './w3cing.ts';
 
 const DEFAULT_BOOT_URL = 'http://localhost:3903';
 
@@ -57,6 +59,8 @@ export class SignifyClient {
     private _oobis = new Oobis(this);
     private _config = new Config(this);
     private _delegations = new Delegations(this);
+    private _didwebs = new DidWebs(this);
+    private _w3c = new W3C(this);
     private _signals = new AgentSignals(this);
     private _exchanges = new Exchanges(this);
     private _groups = new Groups(this);
@@ -503,6 +507,14 @@ export class SignifyClient {
      */
     delegations(): Delegations {
         return this._delegations;
+    }
+
+    didwebs(): DidWebs {
+        return this._didwebs;
+    }
+
+    w3c(): W3C {
+        return this._w3c;
     }
 
     /**

@@ -75,6 +75,10 @@ export interface IdentifierInfo {
     name: string;
 }
 
+export interface IdentifierDwsResult {
+    dws: string | null;
+}
+
 export interface LocSchemeArgs {
     url: string;
     scheme?: string;
@@ -136,6 +140,18 @@ export class Identifier {
         const method = 'GET';
         const res = await this.client.fetch(path, method, data);
         return await res.json();
+    }
+
+    /**
+     * Get the published did:webs DID for a managed identifier, if available.
+     * @param {string} name Prefix or alias of the identifier
+     * @returns {Promise<string | null>} The did:webs DID once published, otherwise null
+     */
+    async dws(name: string): Promise<string | null> {
+        const path = `/identifiers/${encodeURIComponent(name)}/dws`;
+        const res = await this.client.fetch(path, 'GET', null);
+        const body = (await res.json()) as IdentifierDwsResult;
+        return body.dws ?? null;
     }
 
     /**

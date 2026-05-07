@@ -8,11 +8,13 @@ export * from './keri/app/clienting.ts';
 export * from './keri/app/contacting.ts';
 export * from './keri/app/coring.ts';
 export * from './keri/app/credentialing.ts';
+export * from './keri/app/didwebing.ts';
 export * from './keri/app/escrowing.ts';
 export * from './keri/app/exchanging.ts';
 export * from './keri/app/grouping.ts';
 export * from './keri/app/notifying.ts';
 export * from './keri/app/signaling.ts';
+export * from './keri/app/w3cing.ts';
 
 export * from './keri/core/authing.ts';
 export * from './keri/core/cigar.ts';
