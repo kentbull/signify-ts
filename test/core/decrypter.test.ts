@@ -1,11 +1,12 @@
 import libsodium from 'libsodium-wrappers-sumo';
 import { Signer } from '../../src/keri/core/signer.ts';
-import { Matter, MtrDex } from '../../src/keri/core/matter.ts';
+import { Matter, MtrDex, NumDex } from '../../src/keri/core/matter.ts';
 import { assert, describe, it } from 'vitest';
 import { Salter } from '../../src/keri/core/salter.ts';
 import { Decrypter } from '../../src/keri/core/decrypter.ts';
 import { Encrypter } from '../../src/keri/core/encrypter.ts';
 import { b } from '../../src/keri/core/core.ts';
+import { Cipher } from '../../src/keri/core/cipher.ts';
 
 describe('Decrypter', () => {
     it('should decrypt stuff', async () => {
@@ -181,13 +182,7 @@ describe('Decrypter', () => {
             null,
             MtrDex.X25519_Cipher_L0
         );
-        assert.ok(
-            [
-                MtrDex.X25519_Cipher_L0,
-                MtrDex.X25519_Cipher_L1,
-                MtrDex.X25519_Cipher_L2,
-            ].includes(streamSeedCipher.code)
-        );
+        assert.equal(streamSeedCipher.code, MtrDex.X25519_Cipher_L1);
         designer = decrypter.decrypt(
             streamSeedCipher.qb64b,
             null,
@@ -195,5 +190,23 @@ describe('Decrypter', () => {
         );
         assert.deepStrictEqual(designer.qb64b, seedqb64b);
         assert.equal(designer.code, MtrDex.Ed25519_Seed);
+
+        const l2Plain = new Matter({
+            raw: new Uint8Array([0, 65]),
+            code: NumDex.Short,
+        }).qb64b;
+        const streamL2Cipher = encrypter.encrypt(
+            l2Plain,
+            null,
+            MtrDex.X25519_Cipher_L0
+        );
+        assert.equal(streamL2Cipher.code, MtrDex.X25519_Cipher_L2);
+
+        const parsedL2Cipher = new Cipher({ qb64b: streamL2Cipher.qb64b });
+        assert.deepStrictEqual(parsedL2Cipher.raw, streamL2Cipher.raw);
+        assert.deepStrictEqual(
+            libsodium.crypto_box_seal_open(parsedL2Cipher.raw, pubkey, prikey),
+            l2Plain
+        );
     });
 });

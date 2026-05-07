@@ -1,6 +1,6 @@
 import { EmptyMaterialError } from './kering.ts';
 
-import { b64ToInt, intToB64, readInt } from './core.ts';
+import { b64ToInt, concat, intToB64, readInt } from './core.ts';
 import { b, d } from './core.ts';
 import { decodeBase64Url, encodeBase64Url } from './base64.ts';
 
@@ -318,7 +318,7 @@ export class Matter {
                 }
             } else {
                 const sizage = Matter.Sizes.get(code);
-                if (sizage!.fs == -1) {
+                if (sizage!.fs === undefined) {
                     // invalid
                     throw new Error(`Unsupported variable size code=${code}`);
                 }
@@ -379,7 +379,7 @@ export class Matter {
     static _rawSize(code: string) {
         const sizage = this.Sizes.get(code); // get sizes
         const cs = sizage!.hs + sizage!.ss; // both hard + soft code size
-        if (sizage!.fs === -1) {
+        if (sizage!.fs === undefined) {
             throw Error(`Non-fixed raw size code ${code}.`);
         }
 
@@ -398,63 +398,62 @@ export class Matter {
 
     private _infil() {
         const code = this.code;
+        const both = this.both;
         const size = this.size;
         const raw = this.raw;
-
-        const ps = (3 - (raw.length % 3)) % 3; // pad size chars or lead size bytes
+        const rawSize = raw.length;
         const sizage = Matter.Sizes.get(code);
+        const hardSoftSize = sizage!.hs + sizage!.ss;
+        const leadSize = sizage!.ls!;
+        // Matter.Sizes tests are expected to ensure valid code table entries.
 
         if (sizage!.fs === undefined) {
-            // Variable size code, NOT SUPPORTED
-            const cs = sizage!.hs + sizage!.ss;
-            if (cs % 4) {
+            // Variable-size entries can fix the lead size and code alignment,
+            // but not the raw size. At runtime, lead + raw must be 24-bit
+            // aligned so the qualified Base64 has no trailing pad chars.
+            if ((leadSize + rawSize) % 3 || hardSoftSize % 4) {
                 throw new Error(
-                    `Whole code size not multiple of 4 for variable length material. cs=${cs}`
+                    `Invalid full code=${both} with variable raw size=${rawSize}.`
                 );
             }
             if (size < 0 || size > 64 ** sizage!.ss - 1) {
                 throw new Error(`Invalid size=${size} for code=${code}.`);
             }
 
-            const both = `${code}${intToB64(size, sizage!.ss)}`;
-            if (both.length % 4 !== ps - sizage!.ls!) {
+            // With lead + raw aligned, encode lead zero bytes plus raw directly.
+            // The lead bytes are not material; they preserve CESR alignment.
+            const lead = new Uint8Array(leadSize);
+            const full = both + encodeBase64Url(concat(lead, raw));
+
+            if (full.length % 4) {
                 throw new Error(
-                    `Invalid code=${both} for converted raw pad size=${ps}.`
+                    `Invalid full size given code=${both} with raw size=${rawSize}.`
                 );
             }
-
-            const bytes = new Uint8Array(sizage!.ls! + raw.length);
-            for (let i = 0; i < sizage!.ls!; i++) {
-                bytes[i] = 0;
-            }
-            for (let i = 0; i < raw.length; i++) {
-                const odx = i + sizage!.ls!;
-                bytes[odx] = raw[i];
-            }
-
-            return both + encodeBase64Url(bytes);
+            return full;
         } else {
-            const both = code;
-            const cs = both.length;
-            if (cs % 4 != ps - sizage!.ls!) {
-                // adjusted pad given lead bytes
+            // For fixed-size codes, the net prepad must equal the code-size
+            // remainder so code + converted padded raw has the declared size.
+            const prepadSize = (3 - ((rawSize + leadSize) % 3)) % 3;
+            if (prepadSize !== hardSoftSize % 4) {
                 throw new Error(
-                    `Invalid code=${both} for converted raw pad size=${ps}, ${raw.length}.`
+                    `Invalid full code=${both} with fixed raw size=${rawSize}.`
                 );
             }
-            // prepad, convert, and replace upfront
-            // when fixed and ls != 0 then cs % 4 is zero and ps==ls
-            // otherwise  fixed and ls == 0 then cs % 4 == ps
-            const bytes = new Uint8Array(ps + raw.length);
-            for (let i = 0; i < ps; i++) {
-                bytes[i] = 0;
-            }
-            for (let i = 0; i < raw.length; i++) {
-                const odx = i + ps;
-                bytes[odx] = raw[i];
-            }
 
-            return both + encodeBase64Url(bytes).slice(cs % 4);
+            // Prepad raw so the full primitive is midpadded: encode
+            // prepad + lead + raw, then skip the prepad chars after conversion.
+            // This keeps the primitive fullSize while requiring zero midpad bits.
+            const lead = new Uint8Array(prepadSize + leadSize);
+            const full =
+                both + encodeBase64Url(concat(lead, raw)).slice(prepadSize);
+
+            if (full.length % 4 || full.length !== sizage!.fs) {
+                throw new Error(
+                    `Invalid full size given code=${both} with raw size=${rawSize}.`
+                );
+            }
+            return full;
         }
     }
 
@@ -480,10 +479,13 @@ export class Matter {
 
         const sizage = Matter.Sizes.get(hard);
         const cs = sizage!.hs + sizage!.ss;
+        // Matter.Sizes and Matter.Hards tests are expected to keep these
+        // entries well formed. Variable codes use soft chars for size.
         let size = -1;
         let fullSize: number;
         if (sizage!.fs === undefined) {
             const soft = qb64.slice(sizage!.hs, cs);
+            // The soft part stores the variable material size in Base64 triplets.
             size = b64ToInt(soft);
             fullSize = cs + size * 4;
         } else {
@@ -496,15 +498,24 @@ export class Matter {
         }
 
         qb64 = qb64.slice(0, fullSize);
-        const ps = cs % 4;
-        const base = new Array(ps + 1).join('A') + qb64.slice(cs);
+        // Check for non-zeroed pad bits and/or lead bytes. The net prepad is
+        // cs % 4 and is limited by table invariants to 0, 1, or 2 bytes.
+        const prepadSize = cs % 4;
+        // Prepending prepad 'A' chars reverses _infil's midpad slicing and
+        // lets decode recover prepad + lead + raw bytes for validation.
+        const base = new Array(prepadSize + 1).join('A') + qb64.slice(cs);
         const paw = Uint8Array.from(decodeBase64Url(base));
-        const leadSize = ps + sizage!.ls!;
+        const leadSize = prepadSize + sizage!.ls!;
+        // All recovered prepad and lead bytes must be zero before stripping.
         const pi = readInt(paw.subarray(0, leadSize));
         if (pi != 0) {
-            throw new Error(`Non zeroed lead bytes = 0x${pi.toString(16)}`);
+            throw new Error(`Nonzero midpad bytes = 0x${pi.toString(16)}`);
         }
         const raw = paw.subarray(leadSize);
+        const rawSize = Math.floor(((qb64.length - cs) * 3) / 4) - sizage!.ls!;
+        if (raw.length !== rawSize) {
+            throw new Error(`Improperly qualified material = ${qb64}`);
+        }
 
         this._code = hard; // hard only
         this._size = size;
