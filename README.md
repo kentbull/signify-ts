@@ -92,6 +92,13 @@ KERIA can publish transient server-sent events for the connected agent at
 SSE delivery is not durable. Topic resources should provide durable polling
 fallbacks for missed events and restarts.
 
+### did:webs and W3C crosswalk helpers
+
+SignifyTS exposes did:webs publication and W3C projection helpers for KERIA
+workflows that request edge signatures from the Signify client. These helpers
+use the generic `client.signals()` channel for transient signed requests and
+own their topic-specific durable polling and approval APIs.
+
 ### Unit testing
 
 To run unit tests
