@@ -92,6 +92,12 @@ KERIA can publish transient server-sent events for the connected agent at
 SSE delivery is not durable. Topic resources should provide durable polling
 fallbacks for missed events and restarts.
 
+### did:webs helpers
+
+SignifyTS exposes did:webs publication helpers through `client.didwebs()`.
+W3C VC-JWT and VP-JWT artifact semantics live outside SignifyTS in the
+`signify-w3c` package.
+
 ### Unit testing
 
 To run unit tests

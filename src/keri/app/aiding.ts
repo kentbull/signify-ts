@@ -75,6 +75,12 @@ export interface IdentifierInfo {
     name: string;
 }
 
+export interface IdentifierDwsResult {
+    dws: string | null;
+    didJsonUrl: string | null;
+    keriCesrUrl: string | null;
+}
+
 export interface LocSchemeArgs {
     url: string;
     scheme?: string;
@@ -136,6 +142,17 @@ export class Identifier {
         const method = 'GET';
         const res = await this.client.fetch(path, method, data);
         return await res.json();
+    }
+
+    /**
+     * Get published did:webs material for a managed identifier, if available.
+     * @param {string} name Prefix or alias of the identifier
+     * @returns {Promise<IdentifierDwsResult>} The did:webs DID and asset URLs once published
+     */
+    async dws(name: string): Promise<IdentifierDwsResult> {
+        const path = `/identifiers/${name}/dws`;
+        const res = await this.client.fetch(path, 'GET', null);
+        return (await res.json()) as IdentifierDwsResult;
     }
 
     /**
