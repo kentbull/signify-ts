@@ -8,6 +8,7 @@ export * from './keri/app/clienting.ts';
 export * from './keri/app/contacting.ts';
 export * from './keri/app/coring.ts';
 export * from './keri/app/credentialing.ts';
+export * from './keri/app/didwebing.ts';
 export * from './keri/app/escrowing.ts';
 export * from './keri/app/exchanging.ts';
 export * from './keri/app/grouping.ts';

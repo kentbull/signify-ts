@@ -152,6 +152,27 @@ describe('Aiding', () => {
         assert.equal(lastCall.path, '/identifiers/a%20name%20with%20%C3%B1!');
     });
 
+    it('Does not pre-encode identifier names when getting did:webs material', async () => {
+        client.fetch.mockResolvedValue(
+            Response.json({
+                dws: 'did:webs:example:dws:aid1',
+                didJsonUrl: 'https://example/dws/aid1/did.json',
+                keriCesrUrl: 'https://example/dws/aid1/keri.cesr',
+            })
+        );
+
+        const dws = await client.identifiers().dws('aid:name with ñ!');
+        const lastCall = client.getLastMockRequest();
+
+        assert.deepEqual(dws, {
+            dws: 'did:webs:example:dws:aid1',
+            didJsonUrl: 'https://example/dws/aid1/did.json',
+            keriCesrUrl: 'https://example/dws/aid1/keri.cesr',
+        });
+        assert.equal(lastCall.method, 'GET');
+        assert.equal(lastCall.path, '/identifiers/aid:name with ñ!/dws');
+    });
+
     it('Can create salty AID with multiple signatures', async () => {
         client.fetch.mockResolvedValue(Response.json({}));
 
