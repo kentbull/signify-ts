@@ -59,7 +59,7 @@ export class SignifyClient {
     bootUrl: string;
     exteralModules: ExternalModule[];
     authMode: AuthMode;
-    
+
     private _identifiers = new Identifier(this);
     private _operations = new Operations(this);
     private _keyEvents = new KeyEvents(this);
