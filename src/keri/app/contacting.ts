@@ -1,12 +1,9 @@
 import { SignifyClient } from './clienting.ts';
-import { Operation } from './coring.ts';
+import { components } from '../../types/keria-api-schema.ts';
+import { ChallengeOperation } from '../core/keyState.ts';
+import { Exn } from './exchanging.ts';
 
-export interface Contact {
-    alias: string;
-    oobi: string;
-    id: string;
-    [key: string]: unknown;
-}
+export type Contact = components['schemas']['Contact'];
 
 export interface ContactInfo {
     [key: string]: unknown;
@@ -111,9 +108,7 @@ export class Contacts {
     }
 }
 
-export interface Challenge {
-    words: string[];
-}
+export type Challenge = components['schemas']['Challenge'];
 
 /**
  * Challenges
@@ -132,7 +127,7 @@ export class Challenges {
      * Generate a random challenge word list based on BIP39
      * @async
      * @param {number} strength Integer representing the strength of the challenge. Typically 128 or 256
-     * @returns {Promise<any>} A promise to the list of random words
+     * @returns {Promise<Challenge>} A promise to the generated challenge
      */
     async generate(strength: number = 128): Promise<Challenge> {
         const path = `/challenges?strength=${strength.toString()}`;
@@ -147,13 +142,13 @@ export class Challenges {
      * @param name Name or alias of the identifier
      * @param recipient Prefix of the recipient of the response
      * @param words List of words to embed in the signed response
-     * @returns A promise to the result of the response
+     * @returns {Promise<Exn>} A promise to the signed response exn message
      */
     async respond(
         name: string,
         recipient: string,
         words: string[]
-    ): Promise<unknown> {
+    ): Promise<Exn> {
         const hab = await this.client.identifiers().get(name);
         const exchanges = this.client.exchanges();
         const resp = await exchanges.send(
@@ -174,7 +169,7 @@ export class Challenges {
      * @param words List of challenge words to check for
      * @returns A promise to the long running operation
      */
-    async verify(source: string, words: string[]): Promise<Operation<unknown>> {
+    async verify(source: string, words: string[]): Promise<ChallengeOperation> {
         const path = `/challenges_verify/${source}`;
         const method = 'POST';
         const data = {

@@ -1,21 +1,28 @@
 import { assert, beforeAll, afterAll, test, expect } from 'vitest';
-import { Ilks, Saider, Serder, SignifyClient } from 'signify-ts';
+import {
+    assertIpexOffer,
+    Ilks,
+    Saider,
+    Serder,
+    SignifyClient,
+} from 'signify-ts';
 import { resolveEnvironment } from './utils/resolve-env.ts';
 import {
     assertNotifications,
+    assertNoNotifications,
     assertOperations,
     createAid,
     getOrCreateClients,
     getOrCreateContact,
     markAndRemoveNotification,
     resolveOobi,
+    waitAndMarkNotification,
     waitForNotifications,
     waitOperation,
 } from './utils/test-util.ts';
 import { retry } from './utils/retry.ts';
 import { randomUUID } from 'node:crypto';
 import { step } from './utils/test-step.ts';
-
 const { vleiServerUrl } = resolveEnvironment();
 
 const QVI_SCHEMA_SAID = 'EBfdlu8R27Fbx-ehrqwImnK-8Cm79sqbAQ4MmvEAYqao';
@@ -47,6 +54,12 @@ let legalEntityAid: Aid;
 let applySaid: string;
 let offerSaid: string;
 let agreeSaid: string;
+let qviGrantSaid: string;
+let presentationGrantSaid: string;
+let leGrantSaid: string;
+let qviAdmitSaid: string;
+let presentationAdmitSaid: string;
+let leAdmitSaid: string;
 
 beforeAll(async () => {
     [issuerClient, holderClient, verifierClient, legalEntityClient] =
@@ -168,6 +181,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
 
     await step('issuer list credentials', async () => {
         const issuerCredentials = await issuerClient.credentials().list();
+        assertLength(issuerCredentials, 1);
         assert(issuerCredentials.length >= 1);
         assert.equal(issuerCredentials[0].sad.s, QVI_SCHEMA_SAID);
         assert.equal(issuerCredentials[0].sad.i, issuerAid.prefix);
@@ -229,6 +243,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
         const issuerCredential = await issuerClient
             .credentials()
             .get(qviCredentialId);
+        assert(issuerCredential !== undefined);
         assert.equal(issuerCredential.sad.s, QVI_SCHEMA_SAID);
         assert.equal(issuerCredential.sad.i, issuerAid.prefix);
         assert.equal(issuerCredential.status.s, '0');
@@ -246,10 +261,11 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             acdc: new Serder(issuerCredential.sad),
             anc: new Serder(issuerCredential.anc),
             iss: new Serder(issuerCredential.iss),
-            ancAttachment: issuerCredential.ancAttachment,
+            ancAttachment: issuerCredential.ancatc,
             recipient: holderAid.prefix,
             datetime: dt,
         });
+        qviGrantSaid = grant.said;
 
         const op = await issuerClient
             .ipex()
@@ -257,6 +273,9 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(issuerClient, op);
+        await waitAndMarkNotification(issuerClient, '/exn/ipex/grant', {
+            said: qviGrantSaid,
+        });
     });
 
     await step(
@@ -272,23 +291,31 @@ test('single signature credentials', { timeout: 90000 }, async () => {
     );
 
     await step('holder IPEX admit', async () => {
-        const holderNotifications = await waitForNotifications(
+        const grantNotifications = await waitForNotifications(
             holderClient,
-            '/exn/ipex/grant'
+            '/exn/ipex/grant',
+            { said: qviGrantSaid }
         );
-        const grantNotification = holderNotifications[0]; // should only have one notification right now
+        assert.equal(grantNotifications.length, 1);
+        const grantNotification = grantNotifications[0];
+        assert(grantNotification.a.d);
 
         const [admit, sigs, aend] = await holderClient.ipex().admit({
             senderName: holderAid.name,
             message: '',
-            grantSaid: grantNotification.a.d!,
+            grantSaid: grantNotification.a.d,
             recipient: issuerAid.prefix,
             datetime: createTimestamp(),
         });
+        qviAdmitSaid = admit.said;
+
         const op = await holderClient
             .ipex()
             .submitAdmit(holderAid.name, admit, sigs, aend, [issuerAid.prefix]);
         await waitOperation(holderClient, op);
+        await waitAndMarkNotification(holderClient, '/exn/ipex/admit', {
+            said: qviAdmitSaid,
+        });
 
         await markAndRemoveNotification(holderClient, grantNotification);
     });
@@ -296,9 +323,12 @@ test('single signature credentials', { timeout: 90000 }, async () => {
     await step('issuer IPEX grant response', async () => {
         const issuerNotifications = await waitForNotifications(
             issuerClient,
-            '/exn/ipex/admit'
+            '/exn/ipex/admit',
+            { said: qviAdmitSaid }
         );
-        await markAndRemoveNotification(issuerClient, issuerNotifications[0]);
+        assert.equal(issuerNotifications.length, 1);
+        const issuerNotification = issuerNotifications[0];
+        await markAndRemoveNotification(issuerClient, issuerNotification);
     });
 
     await step('holder has credential', async () => {
@@ -313,52 +343,66 @@ test('single signature credentials', { timeout: 90000 }, async () => {
         assert.equal(holderCredential.sad.i, issuerAid.prefix);
         assert.equal(holderCredential.status.s, '0');
         assert(holderCredential.atc !== undefined);
+
+        await assertNoNotifications(holderClient, '/exn/ipex/grant', {
+            said: qviGrantSaid,
+        });
     });
 
     await step('verifier IPEX apply', async () => {
-        const [apply, sigs, _] = await verifierClient.ipex().apply({
+        const [apply, sigs] = await verifierClient.ipex().apply({
             senderName: verifierAid.name,
             schemaSaid: QVI_SCHEMA_SAID,
             attributes: { LEI: '5493001KJTIIGC8Y1R17' },
             recipient: holderAid.prefix,
             datetime: createTimestamp(),
         });
+        applySaid = apply.said;
 
         const op = await verifierClient
             .ipex()
             .submitApply(verifierAid.name, apply, sigs, [holderAid.prefix]);
         await waitOperation(verifierClient, op);
+        await waitAndMarkNotification(verifierClient, '/exn/ipex/apply', {
+            said: applySaid,
+        });
     });
 
     await step('holder IPEX apply receive and offer', async () => {
-        const holderNotifications = await waitForNotifications(
+        const holderApplyNotes = await waitForNotifications(
             holderClient,
-            '/exn/ipex/apply'
+            '/exn/ipex/apply',
+            { said: applySaid }
         );
-
-        const holderApplyNote = holderNotifications[0];
+        assert.equal(holderApplyNotes.length, 1);
+        const holderApplyNote = holderApplyNotes[0];
         assert(holderApplyNote.a.d);
 
         const apply = await holderClient.exchanges().get(holderApplyNote.a.d);
-        applySaid = apply.exn.d;
+        assert.strictEqual(apply.exn.d, applySaid);
 
-        const filter: { [x: string]: any } = { '-s': apply.exn.a.s };
-        for (const key in apply.exn.a.a) {
-            filter[`-a-${key}`] = apply.exn.a.a[key];
+        const exnA = apply.exn.a as Record<string, unknown>;
+        const filter: { [x: string]: unknown } = { '-s': exnA.s };
+        const attributes = exnA.a as Record<string, unknown>;
+        if (typeof attributes === 'object' && attributes !== null) {
+            for (const key in attributes) {
+                filter[`-a-${key}`] = attributes[key];
+            }
         }
 
         const matchingCreds = await holderClient.credentials().list({ filter });
         assert.strictEqual(matchingCreds.length, 1);
 
-        await markAndRemoveNotification(holderClient, holderNotifications[0]);
+        await markAndRemoveNotification(holderClient, holderApplyNote);
 
         const [offer, sigs, end] = await holderClient.ipex().offer({
             senderName: holderAid.name,
             recipient: verifierAid.prefix,
             acdc: new Serder(matchingCreds[0].sad),
-            applySaid: applySaid,
+            applySaid: holderApplyNote.a.d,
             datetime: createTimestamp(),
         });
+        offerSaid = offer.said;
 
         const op = await holderClient
             .ipex()
@@ -366,51 +410,60 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 verifierAid.prefix,
             ]);
         await waitOperation(holderClient, op);
+        await waitAndMarkNotification(holderClient, '/exn/ipex/offer', {
+            said: offerSaid,
+        });
     });
 
     await step('verifier receive offer and agree', async () => {
-        const verifierNotifications = await waitForNotifications(
+        const verifierOfferNotes = await waitForNotifications(
             verifierClient,
-            '/exn/ipex/offer'
+            '/exn/ipex/offer',
+            { said: offerSaid }
         );
-
-        const verifierOfferNote = verifierNotifications[0];
+        assert.equal(verifierOfferNotes.length, 1);
+        const verifierOfferNote = verifierOfferNotes[0];
         assert(verifierOfferNote.a.d);
 
-        const offer = await verifierClient
-            .exchanges()
-            .get(verifierOfferNote.a.d);
-        offerSaid = offer.exn.d;
+        const offer = assertIpexOffer(
+            await verifierClient.exchanges().get(verifierOfferNote.a.d)
+        );
+        assert.strictEqual(offer.exn.d, offerSaid);
 
         assert.strictEqual(offer.exn.p, applySaid);
-        assert.strictEqual(offer.exn.e.acdc.a.LEI, '5493001KJTIIGC8Y1R17');
+        assert.strictEqual(offer.exn.e.acdc.d, qviCredentialId);
 
         await markAndRemoveNotification(verifierClient, verifierOfferNote);
 
-        const [agree, sigs, _] = await verifierClient.ipex().agree({
+        const [agree, sigs] = await verifierClient.ipex().agree({
             senderName: verifierAid.name,
             recipient: holderAid.prefix,
-            offerSaid: offerSaid,
+            offerSaid: verifierOfferNote.a.d,
             datetime: createTimestamp(),
         });
+        agreeSaid = agree.said;
 
         const op = await verifierClient
             .ipex()
             .submitAgree(verifierAid.name, agree, sigs, [holderAid.prefix]);
         await waitOperation(verifierClient, op);
+        await waitAndMarkNotification(verifierClient, '/exn/ipex/agree', {
+            said: agreeSaid,
+        });
     });
 
     await step('holder IPEX receive agree and grant/present', async () => {
-        const holderNotifications = await waitForNotifications(
+        const holderAgreeNotes = await waitForNotifications(
             holderClient,
-            '/exn/ipex/agree'
+            '/exn/ipex/agree',
+            { said: agreeSaid }
         );
-
-        const holderAgreeNote = holderNotifications[0];
+        assert.equal(holderAgreeNotes.length, 1);
+        const holderAgreeNote = holderAgreeNotes[0];
         assert(holderAgreeNote.a.d);
 
         const agree = await holderClient.exchanges().get(holderAgreeNote.a.d);
-        agreeSaid = agree.exn.d;
+        assert.strictEqual(agree.exn.d, agreeSaid);
 
         assert.strictEqual(agree.exn.p, offerSaid);
 
@@ -428,10 +481,11 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             iss: new Serder(holderCredential.iss),
             acdcAttachment: holderCredential.atc,
             ancAttachment: holderCredential.ancatc,
-            issAttachment: holderCredential.issAtc,
-            agreeSaid: agreeSaid,
+            issAttachment: holderCredential.issatc,
+            agreeSaid: holderAgreeNote.a.d,
             datetime: createTimestamp(),
         });
+        presentationGrantSaid = grant2.said;
 
         const op = await holderClient
             .ipex()
@@ -439,27 +493,34 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 verifierAid.prefix,
             ]);
         await waitOperation(holderClient, op);
+        await waitAndMarkNotification(holderClient, '/exn/ipex/grant', {
+            said: presentationGrantSaid,
+        });
     });
 
     await step('verifier receives IPEX grant', async () => {
-        const verifierNotifications = await waitForNotifications(
+        const verifierGrantNotes = await waitForNotifications(
             verifierClient,
-            '/exn/ipex/grant'
+            '/exn/ipex/grant',
+            { said: presentationGrantSaid }
         );
-
-        const verifierGrantNote = verifierNotifications[0];
+        assert.equal(verifierGrantNotes.length, 1);
+        const verifierGrantNote = verifierGrantNotes[0];
         assert(verifierGrantNote.a.d);
 
-        const grant = await holderClient.exchanges().get(verifierGrantNote.a.d);
+        const grant = await verifierClient
+            .exchanges()
+            .get(verifierGrantNote.a.d);
         assert.strictEqual(grant.exn.p, agreeSaid);
 
         const [admit3, sigs3, aend3] = await verifierClient.ipex().admit({
             senderName: verifierAid.name,
             message: '',
-            grantSaid: verifierGrantNote.a.d!,
+            grantSaid: verifierGrantNote.a.d,
             recipient: holderAid.prefix,
             datetime: createTimestamp(),
         });
+        presentationAdmitSaid = admit3.said;
 
         const op = await verifierClient
             .ipex()
@@ -467,6 +528,9 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(verifierClient, op);
+        await waitAndMarkNotification(verifierClient, '/exn/ipex/admit', {
+            said: presentationAdmitSaid,
+        });
 
         await markAndRemoveNotification(verifierClient, verifierGrantNote);
 
@@ -477,15 +541,22 @@ test('single signature credentials', { timeout: 90000 }, async () => {
         assert.equal(verifierCredential.sad.s, QVI_SCHEMA_SAID);
         assert.equal(verifierCredential.sad.i, issuerAid.prefix);
         assert.equal(verifierCredential.status.s, '0'); // 0 = issued
+
+        await assertNoNotifications(verifierClient, '/exn/ipex/grant', {
+            said: presentationGrantSaid,
+        });
     });
 
     await step('holder IPEX present response', async () => {
         const holderNotifications = await waitForNotifications(
             holderClient,
-            '/exn/ipex/admit'
+            '/exn/ipex/admit',
+            { said: presentationAdmitSaid }
         );
+        assert.equal(holderNotifications.length, 1);
+        const holderNotification = holderNotifications[0];
 
-        await markAndRemoveNotification(holderClient, holderNotifications[0]);
+        await markAndRemoveNotification(holderClient, holderNotification);
     });
 
     const holderRegistry: { regk: string } = await step(
@@ -556,10 +627,11 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             acdc: new Serder(leCredential.sad),
             anc: new Serder(leCredential.anc),
             iss: new Serder(leCredential.iss),
-            ancAttachment: leCredential.ancAttachment,
+            ancAttachment: leCredential.ancatc,
             recipient: legalEntityAid.prefix,
             datetime: dt,
         });
+        leGrantSaid = grant.said;
 
         const op = await holderClient
             .ipex()
@@ -567,22 +639,29 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 legalEntityAid.prefix,
             ]);
         await waitOperation(holderClient, op);
+        await waitAndMarkNotification(holderClient, '/exn/ipex/grant', {
+            said: leGrantSaid,
+        });
     });
 
     await step('Legal Entity IPEX admit', async () => {
-        const notifications = await waitForNotifications(
+        const grantNotifications = await waitForNotifications(
             legalEntityClient,
-            '/exn/ipex/grant'
+            '/exn/ipex/grant',
+            { said: leGrantSaid }
         );
-        const grantNotification = notifications[0];
+        assert.equal(grantNotifications.length, 1);
+        const grantNotification = grantNotifications[0];
+        assert(grantNotification.a.d);
 
         const [admit, sigs, aend] = await legalEntityClient.ipex().admit({
             senderName: legalEntityAid.name,
             message: '',
-            grantSaid: grantNotification.a.d!,
+            grantSaid: grantNotification.a.d,
             recipient: holderAid.prefix,
             datetime: createTimestamp(),
         });
+        leAdmitSaid = admit.said;
 
         const op = await legalEntityClient
             .ipex()
@@ -590,6 +669,9 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(legalEntityClient, op);
+        await waitAndMarkNotification(legalEntityClient, '/exn/ipex/admit', {
+            said: leAdmitSaid,
+        });
 
         await markAndRemoveNotification(legalEntityClient, grantNotification);
     });
@@ -597,22 +679,41 @@ test('single signature credentials', { timeout: 90000 }, async () => {
     await step('LE credential IPEX grant response', async () => {
         const notifications = await waitForNotifications(
             holderClient,
-            '/exn/ipex/admit'
+            '/exn/ipex/admit',
+            { said: leAdmitSaid }
         );
-        await markAndRemoveNotification(holderClient, notifications[0]);
+        assert.equal(notifications.length, 1);
+        const notification = notifications[0];
+        await markAndRemoveNotification(holderClient, notification);
     });
 
     await step('Legal Entity has chained credential', async () => {
         const legalEntityCredential = await retry(async () =>
             legalEntityClient.credentials().get(leCredentialId)
         );
-
         assert.equal(legalEntityCredential.sad.s, LE_SCHEMA_SAID);
         assert.equal(legalEntityCredential.sad.i, holderAid.prefix);
-        assert.equal(legalEntityCredential.sad.a.i, legalEntityAid.prefix);
+
+        if (
+            'a' in legalEntityCredential.sad &&
+            legalEntityCredential.sad.a !== undefined
+        ) {
+            assert.equal(legalEntityCredential.sad.a !== undefined, true);
+            assert.equal(legalEntityCredential.sad.a.i, legalEntityAid.prefix);
+        }
+
         assert.equal(legalEntityCredential.status.s, '0');
-        assert.equal(legalEntityCredential.chains[0].sad.d, qviCredentialId);
+        assert(Array.isArray(legalEntityCredential.chains));
+        assert(legalEntityCredential.chains.length > 0);
+        const firstChain = legalEntityCredential.chains[0] as {
+            sad: { d: string };
+        };
+        assert.equal(firstChain.sad.d, qviCredentialId);
         assert(legalEntityCredential.atc !== undefined);
+
+        await assertNoNotifications(legalEntityClient, '/exn/ipex/grant', {
+            said: leGrantSaid,
+        });
     });
 
     await step('Issuer revoke QVI credential', async () => {

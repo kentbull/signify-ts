@@ -2,6 +2,44 @@ import { SignifyClient } from './clienting.ts';
 import libsodium from 'libsodium-wrappers-sumo';
 import { Salter } from '../core/salter.ts';
 import { Matter, MtrDex } from '../core/matter.ts';
+import { components } from '../../types/keria-api-schema.ts';
+import {
+    OOBIOperation,
+    QueryOperation,
+    EndRoleOperation,
+    WitnessOperation,
+    DelegationOperation,
+    RegistryOperation,
+    LocSchemeOperation,
+    ChallengeOperation,
+    ExchangeOperation,
+    SubmitOperation,
+    DoneOperation,
+    CredentialOperation,
+    GroupOperation,
+    DelegatorOperation,
+    CompletedOOBIOperation,
+    CompletedQueryOperation,
+    CompletedEndRoleOperation,
+    CompletedWitnessOperation,
+    CompletedDelegationOperation,
+    CompletedRegistryOperation,
+    CompletedLocSchemeOperation,
+    CompletedChallengeOperation,
+    CompletedExchangeOperation,
+    CompletedSubmitOperation,
+    CompletedDoneOperation,
+    CompletedCredentialOperation,
+    CompletedGroupOperation,
+    CompletedDelegatorOperation,
+    CompletedOperation,
+    EndRole,
+} from '../core/keyState.ts';
+
+type OOBI = components['schemas']['OOBI'];
+type KeyState = components['schemas']['KeyStateRecord'];
+type KeyEventRecord = components['schemas']['KeyEventRecord'];
+type AgentConfig = components['schemas']['AgentConfig'];
 
 export function randomPasscode(): string {
     const raw = libsodium.randombytes_buf(16);
@@ -31,9 +69,9 @@ export class Oobis {
      * Get the OOBI(s) for a managed indentifier for a given role
      * @param {string} name Name or alias of the identifier
      * @param {string} role Authorized role
-     * @returns {Promise<any>} A promise to the OOBI(s)
+     * @returns {Promise<OOBI>} A promise to the OOBI(s)
      */
-    async get(name: string, role: string = 'agent'): Promise<any> {
+    async get(name: string, role: string = 'agent'): Promise<OOBI> {
         const path = `/identifiers/${name}/oobis?role=${role}`;
         const method = 'GET';
         const res = await this.client.fetch(path, method, null);
@@ -45,9 +83,9 @@ export class Oobis {
      * @async
      * @param {string} oobi The OOBI to be resolver
      * @param {string} [alias] Optional name or alias to link the OOBI resolution to a contact
-     * @returns {Promise<any>} A promise to the long-running operation
+     * @returns {Promise<OOBIOperation>} A promise to the long-running operation
      */
-    async resolve(oobi: string, alias?: string): Promise<any> {
+    async resolve(oobi: string, alias?: string): Promise<OOBIOperation> {
         const path = `/oobis`;
         const data: any = {
             url: oobi,
@@ -59,18 +97,35 @@ export class Oobis {
         const res = await this.client.fetch(path, method, data);
         return await res.json();
     }
+
+    /**
+     * Get end roles for an AID by prefix
+     * @param {string} aid AID prefix
+     * @param {string} [role] Optional role to filter by
+     * @returns {Promise<EndRole[]>} A promise to the list of end roles
+     */
+    async endroles(aid: string, role?: string): Promise<EndRole[]> {
+        const path = role ? `/endroles/${aid}/${role}` : `/endroles/${aid}`;
+        const res = await this.client.fetch(path, 'GET', null);
+        return await res.json();
+    }
 }
 
-export interface Operation<T = unknown> {
-    name: string;
-    metadata?: {
-        depends?: Operation;
-        [property: string]: any;
-    };
-    done?: boolean;
-    error?: any;
-    response?: T;
-}
+export type Operation =
+    | OOBIOperation
+    | QueryOperation
+    | EndRoleOperation
+    | WitnessOperation
+    | DelegationOperation
+    | RegistryOperation
+    | LocSchemeOperation
+    | ChallengeOperation
+    | ExchangeOperation
+    | SubmitOperation
+    | DoneOperation
+    | CredentialOperation
+    | GroupOperation
+    | DelegatorOperation;
 
 export interface OperationsDeps {
     fetch(
@@ -79,10 +134,6 @@ export interface OperationsDeps {
         body: unknown,
         headers?: Headers
     ): Promise<Response>;
-}
-
-export interface AgentConfig {
-    iurls?: string[];
 }
 
 /**
@@ -100,13 +151,44 @@ export class Operations {
         this.client = client;
     }
 
+    private hasDepends(op: Operation): op is (
+        | RegistryOperation
+        | CredentialOperation
+        | DelegatorOperation
+    ) & {
+        metadata: NonNullable<
+            (
+                | RegistryOperation
+                | CredentialOperation
+                | DelegatorOperation
+            )['metadata']
+        >;
+    } {
+        return op.metadata !== undefined && 'depends' in op.metadata;
+    }
+
+    /**
+     * Check if operation failed and throw error with details
+     * @throws {Error} If operation has an error
+     */
+    private throwIfFailed(op: Operation): asserts op is CompletedOperation {
+        if ('error' in op && op.error !== null) {
+            const details = op.error.details
+                ? ` Details: ${JSON.stringify(op.error.details)}`
+                : '';
+            throw new Error(
+                `Operation '${op.name}' failed [Code ${op.error.code}]: ${op.error.message}${details}`
+            );
+        }
+    }
+
     /**
      * Get operation status
      * @async
      * @param {string} name Name of the operation
      * @returns {Promise<Operation>} A promise to the status of the operation
      */
-    async get<T = unknown>(name: string): Promise<Operation<T>> {
+    async get(name: string): Promise<Operation> {
         const path = `/operations/${name}`;
         const data = null;
         const method = 'GET';
@@ -119,7 +201,7 @@ export class Operations {
      * @param {string} type Select operations by type
      * @returns {Promise<Operation[]>} A list of operations
      */
-    async list(type?: string): Promise<Operation<any>[]> {
+    async list(type?: string): Promise<Operation[]> {
         const params = new URLSearchParams();
         if (type !== undefined) {
             params.append('type', type);
@@ -145,41 +227,181 @@ export class Operations {
     /**
      * Poll for operation to become completed.
      */
-    async wait<T>(
-        op: Operation<T>,
+    async wait(
+        op: OOBIOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedOOBIOperation>;
+    async wait(
+        op: QueryOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedQueryOperation>;
+    async wait(
+        op: EndRoleOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedEndRoleOperation>;
+    async wait(
+        op: WitnessOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedWitnessOperation>;
+    async wait(
+        op: DelegationOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedDelegationOperation>;
+    async wait(
+        op: RegistryOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedRegistryOperation>;
+    async wait(
+        op: LocSchemeOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedLocSchemeOperation>;
+    async wait(
+        op: ChallengeOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedChallengeOperation>;
+    async wait(
+        op: ExchangeOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedExchangeOperation>;
+    async wait(
+        op: SubmitOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedSubmitOperation>;
+    async wait(
+        op: DoneOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedDoneOperation>;
+    async wait(
+        op: CredentialOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedCredentialOperation>;
+    async wait(
+        op: GroupOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedGroupOperation>;
+    async wait(
+        op: DelegatorOperation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedDelegatorOperation>;
+    async wait(
+        op: Operation,
+        options?: {
+            signal?: AbortSignal;
+            minSleep?: number;
+            maxSleep?: number;
+            increaseFactor?: number;
+        }
+    ): Promise<CompletedOperation>;
+    async wait(
+        op: Operation,
         options: {
             signal?: AbortSignal;
             minSleep?: number;
             maxSleep?: number;
             increaseFactor?: number;
         } = {}
-    ): Promise<Operation<T>> {
+    ): Promise<CompletedOperation> {
         const minSleep = options.minSleep ?? 10;
         const maxSleep = options.maxSleep ?? 10000;
         const increaseFactor = options.increaseFactor ?? 50;
 
-        if (op.metadata?.depends?.done === false) {
+        if (
+            this.hasDepends(op) &&
+            op.metadata.depends &&
+            !op.metadata.depends.done
+        ) {
             await this.wait(op.metadata.depends, options);
         }
 
         if (op.done === true) {
+            this.throwIfFailed(op);
             return op;
         }
 
         let retries = 0;
-
         while (true) {
             op = await this.get(op.name);
+
+            if (op.done === true) {
+                this.throwIfFailed(op);
+                return op;
+            }
 
             const delay = Math.max(
                 minSleep,
                 Math.min(maxSleep, 2 ** retries * increaseFactor)
             );
             retries++;
-
-            if (op.done === true) {
-                return op;
-            }
 
             await new Promise((resolve) => setTimeout(resolve, delay));
             options.signal?.throwIfAborted();
@@ -204,9 +426,9 @@ export class KeyEvents {
      * Retrieve key events for an identifier
      * @async
      * @param {string} pre Identifier prefix
-     * @returns {Promise<any>} A promise to the key events
+     * @returns {Promise<KeyEventRecord[]>} A promise to the key events
      */
-    async get(pre: string): Promise<any> {
+    async get(pre: string): Promise<KeyEventRecord[]> {
         const path = `/events?pre=${pre}`;
         const data = null;
         const method = 'GET';
@@ -232,9 +454,9 @@ export class KeyStates {
      * Retriene the key state for an identifier
      * @async
      * @param {string} pre Identifier prefix
-     * @returns {Promise<any>} A promise to the key states
+     * @returns {Promise<KeyState[]>} A promise to the key states
      */
-    async get(pre: string): Promise<any> {
+    async get(pre: string): Promise<KeyState[]> {
         const path = `/states?pre=${pre}`;
         const data = null;
         const method = 'GET';
@@ -248,7 +470,7 @@ export class KeyStates {
      * @param {Array<string>} pres List of identifier prefixes
      * @returns {Promise<any>} A promise to the key states
      */
-    async list(pres: string[]): Promise<any> {
+    async list(pres: string[]): Promise<KeyState[]> {
         const path = `/states?${pres.map((pre) => `pre=${pre}`).join('&')}`;
         const data = null;
         const method = 'GET';
@@ -262,9 +484,13 @@ export class KeyStates {
      * @param {string} pre Identifier prefix
      * @param {number} [sn] Optional sequence number
      * @param {any} [anchor] Optional anchor
-     * @returns {Promise<any>} A promise to the long-running operation
+     * @returns {Promise<QueryOperation>} A promise to the long-running operation
      */
-    async query(pre: string, sn?: string, anchor?: any): Promise<any> {
+    async query(
+        pre: string,
+        sn?: string,
+        anchor?: any
+    ): Promise<QueryOperation> {
         const path = `/queries`;
         const data: any = {
             pre: pre,

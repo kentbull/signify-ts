@@ -8,12 +8,13 @@ import { Serder } from '../core/serder.ts';
 import { parseRangeHeaders } from '../core/httping.ts';
 import { IdentifierManagerFactory } from '../core/keeping.ts';
 import { HabState } from '../core/keyState.ts';
+import { components } from '../../types/keria-api-schema.ts';
 
 /** Arguments required to create an identfier */
 export interface CreateIdentiferArgs {
     transferable?: boolean;
-    isith?: string | number | string[];
-    nsith?: string | number | string[];
+    isith?: string | number | string[] | string[][];
+    nsith?: string | number | string[] | string[][];
     wits?: string[];
     toad?: number;
     proxy?: string;
@@ -72,6 +73,15 @@ export interface IdentifierDeps {
 export interface IdentifierInfo {
     name: string;
 }
+
+export interface LocSchemeArgs {
+    url: string;
+    scheme?: string;
+    eid?: string;
+    stamp?: string;
+}
+
+export type GroupMembers = components['schemas']['GroupMember'];
 
 /** Identifier */
 export class Identifier {
@@ -397,7 +407,13 @@ export class Identifier {
             data: data,
         });
 
-        const sigs = await keeper.sign(b(serder.raw));
+        const sigs = await keeper.sign(
+            b(serder.raw),
+            true,
+            undefined,
+            undefined,
+            true
+        );
 
         const jsondata: any = {
             rot: serder.sad,
@@ -484,12 +500,54 @@ export class Identifier {
     }
 
     /**
+     * Authorises a new location scheme (endpoint) for a particular endpoint identifier.
+     * @param {LocSchemeArgs} args
+     * @param name Name or alias of the identifier to sign reply message
+     * @param args Arguments to create authorising reply message from
+     * @returns A promise to the result of the authorization
+     */
+    async addLocScheme(
+        name: string,
+        args: LocSchemeArgs
+    ): Promise<EventResult> {
+        const { url, scheme, eid, stamp } = args;
+        const hab = await this.get(name);
+
+        const rpyData = {
+            eid: eid ?? hab.prefix,
+            url,
+            scheme: scheme ?? 'http',
+        };
+        const rpy = reply(
+            '/loc/scheme',
+            rpyData,
+            stamp,
+            undefined,
+            Serials.JSON
+        );
+
+        const keeper = this.client.manager!.get(hab);
+        const sigs = await keeper.sign(b(rpy.raw));
+
+        const jsondata = {
+            rpy: rpy.sad,
+            sigs: sigs,
+        };
+        const res = await this.client.fetch(
+            '/identifiers/' + name + '/locschemes',
+            'POST',
+            jsondata
+        );
+        return new EventResult(rpy, sigs, res);
+    }
+
+    /**
      * Get the members of a group identifier
      * @async
      * @param {string} name - Name or alias of the identifier
-     * @returns {Promise<any>} - A promise to the list of members
+     * @returns {Promise<GroupMembers>} - A promise to the list of members
      */
-    async members(name: string): Promise<any> {
+    async members(name: string): Promise<GroupMembers> {
         const res = await this.client.fetch(
             '/identifiers/' + name + '/members',
             'GET',

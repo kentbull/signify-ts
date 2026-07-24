@@ -2,6 +2,20 @@ import signify, {
     CreateIdentiferArgs,
     EventResult,
     Operation,
+    OOBIOperation,
+    QueryOperation,
+    EndRoleOperation,
+    WitnessOperation,
+    DelegationOperation,
+    RegistryOperation,
+    LocSchemeOperation,
+    ChallengeOperation,
+    ExchangeOperation,
+    SubmitOperation,
+    DoneOperation,
+    CredentialOperation,
+    GroupOperation,
+    DelegatorOperation,
     randomPasscode,
     ready,
     Salter,
@@ -10,11 +24,24 @@ import signify, {
     HabState,
     ExternalModule,
     AuthMode,
+    CompletedOOBIOperation,
+    CompletedQueryOperation,
+    CompletedEndRoleOperation,
+    CompletedChallengeOperation,
+    CompletedWitnessOperation,
+    CompletedExchangeOperation,
+    CompletedLocSchemeOperation,
+    CompletedRegistryOperation,
+    CompletedDelegationOperation,
+    CompletedDelegatorOperation,
+    CompletedGroupOperation,
+    CompletedCredentialOperation,
+    CompletedDoneOperation,
+    CompletedSubmitOperation,
 } from 'signify-ts';
 import { RetryOptions, retry } from './retry.ts';
 import assert from 'assert';
 import { resolveEnvironment } from './resolve-env.ts';
-import { expect } from 'vitest';
 
 export interface Aid {
     name: string;
@@ -29,6 +56,29 @@ export interface Notification {
     a: { r: string; d?: string; m?: string };
 }
 
+export interface NotificationOptions extends RetryOptions {
+    said?: string;
+    minCount?: number;
+}
+
+function matchesNotification(
+    note: Notification,
+    route: string,
+    said?: string
+): boolean {
+    return (
+        note.a.r === route &&
+        note.r === false &&
+        (said === undefined || note.a.d === said)
+    );
+}
+
+function notificationFilterDescription(route: string, said?: string): string {
+    return said === undefined
+        ? `route ${route}`
+        : `route ${route} and SAID ${said}`;
+}
+
 export function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -39,7 +89,7 @@ export async function admitSinglesig(
     client: SignifyClient,
     aidName: string,
     recipientAid: HabState
-) {
+): Promise<string> {
     const grantMsgSaid = await waitAndMarkNotification(
         client,
         '/exn/ipex/grant'
@@ -52,9 +102,12 @@ export async function admitSinglesig(
         recipient: recipientAid.prefix,
     });
 
-    await client
+    const op = await client
         .ipex()
         .submitAdmit(aidName, admit, sigs, aend, [recipientAid.prefix]);
+    await waitOperation(client, op);
+
+    return admit.said;
 }
 
 /**
@@ -80,11 +133,36 @@ export async function assertOperations(
 export async function assertNotifications(
     ...clients: SignifyClient[]
 ): Promise<void> {
-    for (const client of clients) {
+    for (const [index, client] of clients.entries()) {
         const res = await client.notifications().list();
         const notes = res.notes.filter((i: { r: boolean }) => i.r === false);
-        assert.strictEqual(notes.length, 0);
+        assert.strictEqual(
+            notes.length,
+            0,
+            `Unread notifications remain for client ${index}: ${JSON.stringify(notes)}`
+        );
     }
+}
+
+export async function assertNoNotifications(
+    client: SignifyClient,
+    route: string,
+    options: Pick<NotificationOptions, 'said'> = {}
+): Promise<void> {
+    const response: { notes: Notification[] } = await client
+        .notifications()
+        .list();
+    const notes = response.notes.filter((note) =>
+        matchesNotification(note, route, options.said)
+    );
+    assert.strictEqual(
+        notes.length,
+        0,
+        `Unexpected unread notifications with ${notificationFilterDescription(
+            route,
+            options.said
+        )}: ${JSON.stringify(notes)}`
+    );
 }
 
 export async function createAid(
@@ -255,9 +333,10 @@ export async function getOrCreateContact(
             return contact.id;
         }
     }
-    let op = await client.oobis().resolve(oobi, name);
-    op = await waitOperation(client, op);
-    return op.response.i;
+    const op: OOBIOperation = await client.oobis().resolve(oobi, name);
+    const completed_op = await waitOperation(client, op);
+    const response = completed_op.response;
+    return response.i;
 }
 
 /**
@@ -278,7 +357,7 @@ export async function getOrCreateIdentifier(
     let id: any = undefined;
     try {
         const identfier = await client.identifiers().get(name);
-        // console.log("identifiers.get", identfier);
+        // console.log('identifiers.get', identfier);
         id = identfier.prefix;
     } catch {
         const env = resolveEnvironment();
@@ -291,7 +370,7 @@ export async function getOrCreateIdentifier(
             .create(name, kargs);
         let op = await result.op();
         op = await waitOperation(client, op);
-        // console.log("identifiers.create", op);
+        // console.log('identifiers.create', op);
         id = op.response.i;
     }
     const eid = client.agent?.pre!;
@@ -379,31 +458,8 @@ export async function hasEndRole(
     return false;
 }
 
-/**
- * Logs a warning for each un-handled notification.
- * <p>Replace warnNotifications with assertNotifications when test handles all notifications
- * @see assertNotifications
- */
-export async function warnNotifications(
-    ...clients: SignifyClient[]
-): Promise<void> {
-    let count = 0;
-    for (const client of clients) {
-        const res = await client.notifications().list();
-        const notes = res.notes.filter((i: { r: boolean }) => i.r === false);
-        if (notes.length > 0) {
-            count += notes.length;
-            console.warn('notifications', notes);
-        }
-    }
-    expect(count).toBeGreaterThan(0); // replace warnNotifications with assertNotifications
-}
-
-async function deleteOperations<T = any>(
-    client: SignifyClient,
-    op: Operation<T>
-) {
-    if (op.metadata?.depends) {
+async function deleteOperations(client: SignifyClient, op: Operation) {
+    if (op.metadata && 'depends' in op.metadata && op.metadata.depends) {
         await deleteOperations(client, op.metadata.depends);
     }
 
@@ -479,9 +535,10 @@ export async function waitForCredential(
 
 export async function waitAndMarkNotification(
     client: SignifyClient,
-    route: string
+    route: string,
+    options: NotificationOptions = {}
 ) {
-    const notes = await waitForNotifications(client, route);
+    const notes = await waitForNotifications(client, route, options);
 
     await Promise.all(
         notes.map(async (note) => {
@@ -495,19 +552,25 @@ export async function waitAndMarkNotification(
 export async function waitForNotifications(
     client: SignifyClient,
     route: string,
-    options: RetryOptions = {}
+    options: NotificationOptions = {}
 ): Promise<Notification[]> {
     return retry(async () => {
         const response: { notes: Notification[] } = await client
             .notifications()
             .list();
 
-        const notes = response.notes.filter(
-            (note) => note.a.r === route && note.r === false
+        const notes = response.notes.filter((note) =>
+            matchesNotification(note, route, options.said)
         );
 
-        if (!notes.length) {
-            throw new Error(`No notifications with route ${route}`);
+        const minCount = options.minCount ?? 1;
+        if (notes.length < minCount) {
+            throw new Error(
+                `No notifications with ${notificationFilterDescription(
+                    route,
+                    options.said
+                )}; expected at least ${minCount}, got ${notes.length}`
+            );
         }
 
         return notes;
@@ -518,11 +581,86 @@ export async function waitForNotifications(
  * Poll for operation to become completed.
  * Removes completed operation
  */
-export async function waitOperation<T = any>(
+export async function waitOperation(
     client: SignifyClient,
-    op: Operation<T> | string,
+    op: OOBIOperation | string,
     signal?: AbortSignal
-): Promise<Operation<T>> {
+): Promise<CompletedOOBIOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: QueryOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedQueryOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: EndRoleOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedEndRoleOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: WitnessOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedWitnessOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: DelegationOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedDelegationOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: RegistryOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedRegistryOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: LocSchemeOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedLocSchemeOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: ChallengeOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedChallengeOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: ExchangeOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedExchangeOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: SubmitOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedSubmitOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: DoneOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedDoneOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: CredentialOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedCredentialOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: GroupOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedGroupOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: DelegatorOperation | string,
+    signal?: AbortSignal
+): Promise<CompletedDelegatorOperation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: Operation | string,
+    signal?: AbortSignal
+): Promise<Operation>;
+export async function waitOperation(
+    client: SignifyClient,
+    op: Operation | string,
+    signal?: AbortSignal
+): Promise<Operation> {
     if (typeof op === 'string') {
         op = await client.operations().get(op);
     }

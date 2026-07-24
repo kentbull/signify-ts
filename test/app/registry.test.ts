@@ -10,6 +10,29 @@ import {
 import { assert, describe, expect, it } from 'vitest';
 import { HabState, KeyState } from '../../src/keri/core/keyState.ts';
 
+const keystate: KeyState = {
+    s: '0',
+    d: 'a digest',
+    i: '',
+    p: '',
+    f: '',
+    dt: '',
+    et: '',
+    kt: '',
+    k: [],
+    nt: '',
+    n: [],
+    bt: '',
+    b: [],
+    c: [],
+    ee: {
+        s: '',
+        d: '',
+        br: [],
+        ba: [],
+    },
+    di: '',
+};
 describe('registry', () => {
     it('should create a registry', async () => {
         await libsodium.ready;
@@ -17,11 +40,18 @@ describe('registry', () => {
         const mockedIdentifiers = mock(Identifier);
         const mockedKeyManager = mock(IdentifierManagerFactory);
         const mockedKeeper = mock(SaltyIdentifierManager);
-
-        const hab = {
+        const hab: HabState = {
+            name: 'test-hab',
             prefix: 'hab prefix',
-            state: { s: '0', d: 'a digest' } as KeyState,
-        } as HabState;
+            icp_dt: '2023-12-01T10:05:25.062609+00:00',
+            state: keystate,
+            transferable: false,
+            windexes: [],
+            randy: {
+                prxs: [],
+                nxts: [],
+            },
+        };
 
         when(mockedClient.manager).thenReturn(instance(mockedKeyManager));
         when(mockedKeyManager.get(hab)).thenReturn(instance(mockedKeeper));
@@ -67,14 +97,19 @@ describe('registry', () => {
         const mockedClient = mock(SignifyClient);
         const mockedIdentifiers = mock(Identifier);
 
-        const hab = {
+        keystate.c = ['EO'];
+        const hab: HabState = {
             prefix: 'hab prefix',
-            state: { s: 0, d: 'a digest', c: ['EO'] } as unknown as KeyState,
+            state: keystate,
             name: 'a name',
             transferable: true,
             windexes: [],
             icp_dt: '2023-12-01T10:05:25.062609+00:00',
-        } as HabState;
+            randy: {
+                prxs: [],
+                nxts: [],
+            },
+        };
 
         when(mockedIdentifiers.get('a name')).thenResolve(hab);
         when(mockedClient.identifiers()).thenReturn(

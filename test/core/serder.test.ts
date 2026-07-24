@@ -94,4 +94,30 @@ describe('Serder', () => {
         });
         assert.equal(serder1.sad.v, 'KERI10JSON000139_');
     });
+
+    it('should interpret Serder sequence number correctly from event data', async () => {
+        await libsodium.ready;
+
+        const ked = {
+            v: 'KERI10JSON00013b_',
+            t: 'ixn',
+            d: 'EDMbT6cc2P4aPozDJhat1T_S-G98Gc7Jj8K0qxAL7EuC',
+            i: 'EDKLs7y-U4N_EIv_oqJqdmWOvR5Y-nSEHJPrprT1RLFb',
+            s: '39',
+            p: 'EI696dhEGo9cDK7MpvSsPkNkVhF4pwwgof3GaRVVESXb',
+            a: [
+                {
+                    i: 'EFMXIFSIyEL6JTCyZAbO3nHgSdOw5UbLH9fAr9zO8_LH',
+                    s: '0',
+                    d: 'EFMXIFSIyEL6JTCyZAbO3nHgSdOw5UbLH9fAr9zO8_LH',
+                },
+            ],
+        };
+
+        const serder = new Serder(ked);
+
+        assert.equal(serder.sn, 57);
+        assert.equal(serder.sner.num, 57);
+        assert.equal(serder.sner.numh, '39');
+    });
 });

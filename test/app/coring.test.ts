@@ -5,11 +5,13 @@ import {
     randomNonce,
     Operations,
     OperationsDeps,
+    Operation,
 } from '../../src/keri/app/coring.ts';
 import { SignifyClient } from '../../src/keri/app/clienting.ts';
 import { Tier } from '../../src/keri/core/salter.ts';
 import { randomUUID } from 'node:crypto';
 import { createMockFetch } from './test-utils.ts';
+import { RegistryOperation } from '../../src/keri/core/keyState.ts';
 
 const url = 'http://127.0.0.1:3901';
 const boot_url = 'http://127.0.0.1:3903';
@@ -64,6 +66,42 @@ describe('Coring', () => {
         assert.equal(lastCall[0].method, 'POST');
         assert.deepEqual(lastBody.url, 'http://oobiurl.com');
         assert.deepEqual(lastBody.oobialias, 'witness');
+    });
+
+    it('Endroles without role filter', async () => {
+        await libsodium.ready;
+        const bran = '0123456789abcdefghijk';
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+
+        await client.boot();
+        await client.connect();
+
+        const oobis = client.oobis();
+        const aid = 'ELUvZ8aJEHAQE-0nsevyYTP98rBbGJUrTj5an-pCmwrK';
+
+        await oobis.endroles(aid);
+        const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
+        assert.equal(lastCall[0]!, url + `/endroles/${aid}`);
+        assert.equal(lastCall[1]!.method, 'GET');
+    });
+
+    it('Endroles with role filter', async () => {
+        await libsodium.ready;
+        const bran = '0123456789abcdefghijk';
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+
+        await client.boot();
+        await client.connect();
+
+        const oobis = client.oobis();
+        const aid = 'ELUvZ8aJEHAQE-0nsevyYTP98rBbGJUrTj5an-pCmwrK';
+
+        await oobis.endroles(aid, 'agent');
+        const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
+        assert.equal(lastCall[0]!, url + `/endroles/${aid}/agent`);
+        assert.equal(lastCall[1]!.method, 'GET');
     });
 
     it('Events and states', async () => {
@@ -235,7 +273,7 @@ describe('Operations', () => {
                 })
             );
 
-            const op = { name, done: true };
+            const op: Operation = { name, done: true, response: {} };
             const result = await client.operations().wait(op);
             assert.equal(client.fetch.mock.calls.length, 0);
             assert.equal<unknown>(op, result);
@@ -249,7 +287,7 @@ describe('Operations', () => {
                 })
             );
 
-            const op = { name, done: false };
+            const op: Operation = { name, done: false };
             await client.operations().wait(op);
             assert.equal(client.fetch.mock.calls.length, 1);
         });
@@ -268,7 +306,7 @@ describe('Operations', () => {
                 })
             );
 
-            const op = { name, done: false };
+            const op: Operation = { name, done: false };
             await client.operations().wait(op, { maxSleep: 10 });
             assert.equal(client.fetch.mock.calls.length, 2);
         });
@@ -282,7 +320,7 @@ describe('Operations', () => {
                     })
             );
 
-            const op = { name, done: false };
+            const op: Operation = { name, done: false };
 
             const controller = new AbortController();
             const promise = client
@@ -301,11 +339,25 @@ describe('Operations', () => {
         it('returns when child operation is also done', async () => {
             const name = randomUUID();
             const nestedName = randomUUID();
-            const depends = { name: nestedName, done: false };
-            const op = { name, done: false, depends };
+            const depends: Operation = { name: nestedName, done: false };
+            const op: RegistryOperation = {
+                name,
+                done: false,
+                metadata: {
+                    pre: 'prefix',
+                    anchor: { pre: 'prefix', sn: 0, d: 'd' },
+                    depends,
+                },
+            };
 
             client.fetch.mockResolvedValueOnce(
-                new Response(JSON.stringify({ ...op, done: false }), {
+                new Response(JSON.stringify({ ...depends, done: false }), {
+                    status: 200,
+                })
+            );
+
+            client.fetch.mockResolvedValueOnce(
+                new Response(JSON.stringify({ ...depends, done: true }), {
                     status: 200,
                 })
             );
@@ -314,7 +366,10 @@ describe('Operations', () => {
                 new Response(
                     JSON.stringify({
                         ...op,
-                        depends: { ...depends, done: true },
+                        metadata: {
+                            ...op.metadata,
+                            depends: { ...depends, done: true },
+                        },
                     }),
                     {
                         status: 200,
@@ -327,7 +382,10 @@ describe('Operations', () => {
                     JSON.stringify({
                         ...op,
                         done: true,
-                        depends: { ...depends, done: true },
+                        metadata: {
+                            ...op.metadata,
+                            depends: { ...depends, done: true },
+                        },
                     }),
                     {
                         status: 200,
@@ -336,7 +394,7 @@ describe('Operations', () => {
             );
 
             await client.operations().wait(op, { maxSleep: 10 });
-            assert.equal(client.fetch.mock.calls.length, 3);
+            assert.equal(client.fetch.mock.calls.length, 4);
         });
     });
 });

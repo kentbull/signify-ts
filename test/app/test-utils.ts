@@ -102,6 +102,7 @@ export async function createMockIdentifierState(
         [algo]: keeper.params(),
         transferable,
         windexes: [],
+        extern: extern ?? {},
         state: {
             vn: [serder.version.major, serder.version.minor],
             s: serder.sad.s,

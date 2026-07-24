@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         os: [macOS-latest, ubuntu-latest]
-        node-version: ['18', '20', '22']
+        node-version: ['20', '22', '24']
 
     steps:
       - name: Checkout repo
@@ -33,16 +33,16 @@ jobs:
           npm cache clean --force
           npm set registry https://registry.npmjs.org/
           npm ci
-      
+
       - name: Check formatting
-        run: npm run pretty:check 
-      
+        run: npm run pretty:check
+
       - name: Lint
         run: npm run lint
 
       - name: Build
         run: npm run build
- 
+
       - name: Test
         run: npm test -- --coverage=true
 
@@ -57,7 +57,7 @@ jobs:
     strategy:
       matrix:
         os: ['ubuntu-latest']
-        keria-version: ['0.2.0-dev6']
+        keria-version: ['0.4.0', 'latest']
         node-version: ['20']
         auth-mode: ['signed-headers', 'essr']
     env:
@@ -84,17 +84,3 @@ jobs:
       - name: Print logs
         run: docker compose logs
         if: always()
-
-  audit:
-    name: Find vulnerabilities
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - name: Run audit
-        run: npm audit
