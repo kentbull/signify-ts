@@ -1,5 +1,6 @@
-import { assert, describe, it, test, expect } from 'vitest';
+import { assert, describe, it, test, expect, vitest } from 'vitest';
 import { SignifyClient } from '../../src/keri/app/clienting.ts';
+import { Controller } from '../../src/keri/app/controller.ts';
 import { Identifier } from '../../src/keri/app/aiding.ts';
 import {
     Operations,
@@ -24,7 +25,11 @@ import {
 } from '../../src/keri/core/httping.ts';
 import { Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
-import { createMockFetch } from './test-utils.ts';
+import {
+    createMockFetch,
+    createSignedAgentResponse,
+    mockConnect,
+} from './test-utils.ts';
 
 const fetchMock = createMockFetch();
 
@@ -64,6 +69,7 @@ describe('SignifyClient', () => {
         );
         assert.deepEqual(client.controller.serder.sad.s, '0');
 
+        const bootController = client.controller;
         const res = await client.boot();
         assert.equal(fetchMock.mock.calls[0]![0]!, boot_url + '/boot');
         assert.equal(
@@ -72,7 +78,8 @@ describe('SignifyClient', () => {
         );
         assert.equal(res.status, 202);
 
-        await client.connect();
+        await client.connectAfterBoot();
+        assert.equal(client.controller, bootController);
 
         // validate agent
         assert(
@@ -125,6 +132,92 @@ describe('SignifyClient', () => {
         assert.equal(client.oobis() instanceof Oobis, true);
         assert.equal(client.exchanges() instanceof Exchanges, true);
         assert.equal(client.groups() instanceof Groups, true);
+    });
+
+    it('does not resubmit an existing Agent delegation', async () => {
+        await libsodium.ready;
+        const state = structuredClone(mockConnect);
+        state.controller.state.s = '1';
+        fetchMock.mockResolvedValueOnce(
+            Response.json(state, { status: 200 })
+        );
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        const approveDelegation = vitest.spyOn(
+            client,
+            'approveDelegation'
+        );
+
+        await client.connect();
+
+        expect(approveDelegation).not.toHaveBeenCalled();
+        assert(client.authn !== null);
+    });
+
+    it('rejects a locally generated delegation event with the wrong Agent seal', async () => {
+        await libsodium.ready;
+        const originalApproval = Controller.prototype.approveDelegation;
+        const approval = vitest.spyOn(
+            Controller.prototype,
+            'approveDelegation'
+        );
+        approval.mockImplementation(function (this: Controller, agent) {
+            const signatures = originalApproval.call(this, agent);
+            this.serder.sad.a[0].d = 'EWrongAgentDelegationSeal';
+            return signatures;
+        });
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        const firstCall = fetchMock.mock.calls.length;
+        try {
+            await expect(client.connect()).rejects.toThrow(
+                'controller delegation approval seal does not match KERIA agent'
+            );
+        } finally {
+            approval.mockRestore();
+        }
+
+        assert.equal(
+            fetchMock.mock.calls.slice(firstCall).some(
+                ([input]) =>
+                    input.toString().includes('?type=ixn')
+            ),
+            false
+        );
+        assert.equal(client.authn, null);
+        assert.equal(client.manager, null);
+    });
+
+    it('rejects a non-string authoritative controller sequence', async () => {
+        await libsodium.ready;
+        const state = structuredClone(mockConnect);
+        Reflect.set(state.controller.state, 's', 0);
+        fetchMock.mockResolvedValueOnce(Response.json(state, { status: 200 }));
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        await expect(client.connect()).rejects.toThrow(
+            'KERIA controller state is missing a string sequence number'
+        );
+    });
+
+    it('requires KERIA to accept Agent delegation approval', async () => {
+        await libsodium.ready;
+        fetchMock.mockResolvedValueOnce(
+            Response.json(mockConnect, { status: 200 })
+        );
+        fetchMock.mockResolvedValueOnce(
+            new Response('approval rejected', {
+                status: 503,
+                statusText: 'Service Unavailable',
+            })
+        );
+
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        await expect(client.connect()).rejects.toThrow(
+            'agent delegation approval failed: 503 Service Unavailable - approval rejected'
+        );
+        assert.equal(client.authn, null);
+        assert.equal(client.manager, null);
     });
 
     it('Signed fetch', async () => {

@@ -1,8 +1,11 @@
 import { components } from '../../types/keria-api-schema.ts';
 import { Authenticater } from '../core/authing.ts';
+import { Ilks } from '../core/core.ts';
 import { HEADER_SIG_TIME } from '../core/httping.ts';
 import { ExternalModule, IdentifierManagerFactory } from '../core/keeping.ts';
+import { CesrNumber } from '../core/number.ts';
 import { Tier } from '../core/salter.ts';
+import { Seqner } from '../core/seqner.ts';
 
 import { Identifier } from './aiding.ts';
 import { Contacts, Challenges } from './contacting.ts';
@@ -102,9 +105,17 @@ export class SignifyClient {
     }
 
     /**
-     * Boot a KERIA agent
+     * Boot a KERIA Agent. Call only once per edge Signify Controller.
+     *
+     * On first call this triggers the KERIA agent to edge controller delegation
+     * ceremony causing the KERIA server to provision the agent for a given edge
+     * Signify Controller.
+     *
+     * On subsequent calls the server returns 409 Conflict when the destination
+     * Agent already exists.
+     *
      * @async
-     * @returns {Promise<Response>} A promise to the result of the boot
+     * @returns {Promise<Response>} Response from the KERIA boot endpoint
      */
     async boot(): Promise<Response> {
         const [evt, sign] = this.controller?.event ?? [];
@@ -147,30 +158,141 @@ export class SignifyClient {
         return state;
     }
 
-    /**  Connect to a KERIA agent
+    /**
+     * Connect to an existing KERIA Agent and restore its in-memory Controller.
      * @async
      */
     async connect() {
+        await this.connectToAgent(false);
+    }
+
+    /**
+     * Connect immediately after this client successfully booted its controller.
+     *
+     * The boot request used the controller already held by this instance, so
+     * exact state validation lets us avoid deriving identical keys again.
+     */
+    async connectAfterBoot() {
+        await this.connectToAgent(true);
+    }
+
+    /** Check whether KERIA and this client hold the same establishment state. */
+    private _controllerMatchesKeriaEstablishment(
+        state: State,
+        ctrl: Controller
+    ): boolean {
+        const stateEstEvt = state.controller?.ee;
+        const ctrlEstEvt = ctrl.serder;
+        const rotationIdxMatches = state.ridx === ctrl.ridx;
+        const estEvtPreMatches = stateEstEvt?.i === ctrl.pre;
+        const estEvtSeqNoMatches = stateEstEvt?.s === ctrlEstEvt.sad.s;
+        const estEvtDigMatches = stateEstEvt?.d === ctrlEstEvt.sad.d;
+        return (
+            rotationIdxMatches &&
+            estEvtPreMatches &&
+            estEvtSeqNoMatches &&
+            estEvtDigMatches
+        );
+    }
+
+    /** Return KERIA's authoritative current controller sequence number. */
+    private _controllerSequence(state: State): number {
+        const sequence = state.controller?.state?.s;
+        if (typeof sequence !== 'string') {
+            throw new Error(
+                'KERIA controller state is missing a string sequence number'
+            );
+        }
+
+        return new CesrNumber({}, sequence).num;
+    }
+
+    /** Compute the Agent delegation seal the controller must anchor. */
+    private _agentDelegationSeal() {
+        if (
+            this.agent === null ||
+            this.agent.sn === undefined ||
+            this.agent.said === undefined ||
+            this.agent.said.length === 0
+        ) {
+            throw new Error(
+                'KERIA agent state is incomplete for delegation verification'
+            );
+        }
+
+        return {
+            i: this.agent.pre,
+            s: new Seqner({ sn: this.agent.sn }).snh,
+            d: this.agent.said,
+        };
+    }
+
+    /** Verify the local interaction event anchors this exact Agent. */
+    private _verifyAgentDelegationSeal() {
+        const expected = this._agentDelegationSeal();
+        const event = this.controller.serder.sad;
+        if (event.t !== Ilks.ixn) {
+            throw new Error(
+                'controller delegation approval is not an interaction event'
+            );
+        }
+
+        const seals = event.a;
+        if (!Array.isArray(seals) || seals.length !== 1) {
+            throw new Error(
+                'controller delegation approval must contain exactly one seal'
+            );
+        }
+
+        const seal = seals[0];
+        if (
+            seal.i !== expected.i ||
+            seal.s !== expected.s ||
+            seal.d !== expected.d
+        ) {
+            throw new Error(
+                'controller delegation approval seal does not match KERIA agent'
+            );
+        }
+    }
+
+    /** Load agent state and initialize authenticated client services. */
+    private async connectToAgent(reuseController: boolean) {
         const state = await this.state();
         this.pidx = state.pidx;
-        //Create controller representing the local client AID
-        this.controller = new Controller(
-            this.bran,
-            this.tier,
-            0,
-            state.controller
-        );
+        if (reuseController) {
+            if (
+                !this._controllerMatchesKeriaEstablishment(
+                    state,
+                    this.controller
+                )
+            ) {
+                throw new Error(
+                    'booted controller does not match KERIA controller state'
+                );
+            }
+        } else {
+            // Reconnecting clients must derive the keys for persisted state.
+            this.controller = new Controller(
+                this.bran,
+                this.tier,
+                0,
+                state.controller
+            );
+        }
         this.controller.ridx = state.ridx !== undefined ? state.ridx : 0;
         // Create agent representing the AID of KERIA cloud agent
         this.agent = new Agent(state.agent);
-        if (this.agent.anchor != this.controller.pre) {
+        if (this.agent.anchor !== this.controller.pre) {
             throw Error(
                 'commitment to controller AID missing in agent inception event'
             );
         }
-        if (this.controller.serder.sad.s == 0) {
+
+        if (this._controllerSequence(state) === 0) {
             await this.approveDelegation();
         }
+
         this.manager = new IdentifierManagerFactory(
             this.controller.salter,
             this.exteralModules
@@ -207,7 +329,7 @@ export class SignifyClient {
         );
         headers.set('Content-Type', 'application/json');
 
-        const _body = method == 'GET' ? null : JSON.stringify(data);
+        const _body = method === 'GET' ? null : JSON.stringify(data);
 
         if (this.authn) {
             signed_headers = this.authn.sign(
@@ -306,13 +428,14 @@ export class SignifyClient {
      */
     async approveDelegation(): Promise<Response> {
         const sigs = this.controller.approveDelegation(this.agent!);
+        this._verifyAgentDelegationSeal();
 
         const data = {
             ixn: this.controller.serder.sad,
             sigs: sigs,
         };
 
-        return await fetch(
+        const response = await fetch(
             this.url + '/agent/' + this.controller.pre + '?type=ixn',
             {
                 method: 'PUT',
@@ -322,6 +445,15 @@ export class SignifyClient {
                 },
             }
         );
+        if (!response.ok) {
+            const body = await response.text();
+            const details = body.length > 0 ? ` - ${body}` : '';
+            throw new Error(
+                `agent delegation approval failed: ${response.status} ${response.statusText}${details}`
+            );
+        }
+
+        return response;
     }
 
     /**

@@ -210,7 +210,7 @@ export class Controller {
                 .qb64,
         ];
 
-        if (state == null || state['ee']['s'] == 0) {
+        if (state === null || state['ee']['s'] === '0') {
             this.serder = incept({
                 keys: this.keys,
                 isith: '1',
