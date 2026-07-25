@@ -6,6 +6,7 @@ import { ExternalModule, IdentifierManagerFactory } from '../core/keeping.ts';
 import { CesrNumber } from '../core/number.ts';
 import { Tier } from '../core/salter.ts';
 import { Seqner } from '../core/seqner.ts';
+import { Serder } from '../core/serder.ts';
 
 import { Identifier } from './aiding.ts';
 import { Contacts, Challenges } from './contacting.ts';
@@ -22,6 +23,11 @@ const DEFAULT_BOOT_URL = 'http://localhost:3903';
 
 // Export type outside the class
 export type AgentResourceResult = components['schemas']['AgentResourceResult'];
+
+/** Cancellation options for booting or connecting a Signify client. */
+export interface ConnectionOptions {
+    signal?: AbortSignal;
+}
 
 class State {
     agent: any | null;
@@ -115,9 +121,10 @@ export class SignifyClient {
      * Agent already exists.
      *
      * @async
+     * @param {ConnectionOptions} [options] Cancellation options
      * @returns {Promise<Response>} Response from the KERIA boot endpoint
      */
-    async boot(): Promise<Response> {
+    async boot(options: ConnectionOptions = {}): Promise<Response> {
         const [evt, sign] = this.controller?.event ?? [];
         const data = {
             icp: evt.sad,
@@ -133,18 +140,22 @@ export class SignifyClient {
             headers: {
                 'Content-Type': 'application/json',
             },
+            signal: options.signal,
         });
     }
 
     /**
      * Get state of the agent and the client
      * @async
+     * @param {ConnectionOptions} [options] Cancellation options
      * @returns {Promise<Response>} A promise to the state
      */
-    async state(): Promise<State> {
+    async state(options: ConnectionOptions = {}): Promise<State> {
         const caid = this.controller?.pre;
 
-        const res = await fetch(this.url + `/agent/${caid}`);
+        const res = await fetch(this.url + `/agent/${caid}`, {
+            signal: options.signal,
+        });
         if (res.status == 404) {
             throw new Error(`agent does not exist for controller ${caid}`);
         }
@@ -161,9 +172,10 @@ export class SignifyClient {
     /**
      * Connect to an existing KERIA Agent and restore its in-memory Controller.
      * @async
+     * @param {ConnectionOptions} [options] Cancellation options
      */
-    async connect() {
-        await this.connectToAgent(false);
+    async connect(options: ConnectionOptions = {}) {
+        await this.connectToAgent(false, options);
     }
 
     /**
@@ -171,9 +183,11 @@ export class SignifyClient {
      *
      * The boot request used the controller already held by this instance, so
      * exact state validation lets us avoid deriving identical keys again.
+     *
+     * @param {ConnectionOptions} [options] Cancellation options
      */
-    async connectAfterBoot() {
-        await this.connectToAgent(true);
+    async connectAfterBoot(options: ConnectionOptions = {}) {
+        await this.connectToAgent(true, options);
     }
 
     /** Check whether KERIA and this client hold the same establishment state. */
@@ -193,18 +207,6 @@ export class SignifyClient {
             estEvtSeqNoMatches &&
             estEvtDigMatches
         );
-    }
-
-    /** Return KERIA's authoritative current controller sequence number. */
-    private _controllerSequence(state: State): number {
-        const sequence = state.controller?.state?.s;
-        if (typeof sequence !== 'string') {
-            throw new Error(
-                'KERIA controller state is missing a string sequence number'
-            );
-        }
-
-        return new CesrNumber({}, sequence).num;
     }
 
     /** Compute the Agent delegation seal the controller must anchor. */
@@ -228,16 +230,15 @@ export class SignifyClient {
     }
 
     /** Verify the local interaction event anchors this exact Agent. */
-    private _verifyAgentDelegationSeal() {
+    private _verifyAgentDelegationSeal(event: Serder) {
         const expected = this._agentDelegationSeal();
-        const event = this.controller.serder.sad;
-        if (event.t !== Ilks.ixn) {
+        if (event.sad.t !== Ilks.ixn) {
             throw new Error(
                 'controller delegation approval is not an interaction event'
             );
         }
 
-        const seals = event.a;
+        const seals = event.sad.a;
         if (!Array.isArray(seals) || seals.length !== 1) {
             throw new Error(
                 'controller delegation approval must contain exactly one seal'
@@ -257,8 +258,11 @@ export class SignifyClient {
     }
 
     /** Load agent state and initialize authenticated client services. */
-    private async connectToAgent(reuseController: boolean) {
-        const state = await this.state();
+    private async connectToAgent(
+        reuseController: boolean,
+        options: ConnectionOptions
+    ) {
+        const state = await this.state(options);
         this.pidx = state.pidx;
         if (reuseController) {
             if (
@@ -289,8 +293,15 @@ export class SignifyClient {
             );
         }
 
-        if (this._controllerSequence(state) === 0) {
-            await this.approveDelegation();
+        const controllerSequence = state.controller?.state?.s;
+        if (typeof controllerSequence !== 'string') {
+            throw new Error(
+                'KERIA controller state is missing a string sequence number'
+            );
+        }
+
+        if (new CesrNumber({}, controllerSequence).num === 0) {
+            await this.approveDelegation(options);
         }
 
         this.manager = new IdentifierManagerFactory(
@@ -424,15 +435,19 @@ export class SignifyClient {
     /**
      * Approve the delegation of the client AID to the KERIA agent
      * @async
+     * @param {ConnectionOptions} [options] Cancellation options
      * @returns {Promise<Response>} A promise to the result of the approval
      */
-    async approveDelegation(): Promise<Response> {
-        const sigs = this.controller.approveDelegation(this.agent!);
-        this._verifyAgentDelegationSeal();
+    async approveDelegation(
+        options: ConnectionOptions = {}
+    ): Promise<Response> {
+        options.signal?.throwIfAborted();
+        const approval = this.controller.approveDelegation(this.agent!);
+        this._verifyAgentDelegationSeal(approval.event);
 
         const data = {
-            ixn: this.controller.serder.sad,
-            sigs: sigs,
+            ixn: approval.event.sad,
+            sigs: approval.signatures,
         };
 
         const response = await fetch(
@@ -443,6 +458,7 @@ export class SignifyClient {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                signal: options.signal,
             }
         );
         if (!response.ok) {

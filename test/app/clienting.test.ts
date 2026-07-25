@@ -25,11 +25,7 @@ import {
 } from '../../src/keri/core/httping.ts';
 import { Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
-import {
-    createMockFetch,
-    createSignedAgentResponse,
-    mockConnect,
-} from './test-utils.ts';
+import { createMockFetch, mockConnect } from './test-utils.ts';
 
 const fetchMock = createMockFetch();
 
@@ -134,19 +130,30 @@ describe('SignifyClient', () => {
         assert.equal(client.groups() instanceof Groups, true);
     });
 
+    it('forwards one cancellation signal through boot and connect', async () => {
+        await libsodium.ready;
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        const controller = new AbortController();
+        const firstCall = fetchMock.mock.calls.length;
+
+        await client.boot({ signal: controller.signal });
+        await client.connectAfterBoot({ signal: controller.signal });
+
+        const setupCalls = fetchMock.mock.calls.slice(firstCall);
+        assert.equal(setupCalls.length, 3);
+        for (const [, init] of setupCalls) {
+            assert.equal(init?.signal, controller.signal);
+        }
+    });
+
     it('does not resubmit an existing Agent delegation', async () => {
         await libsodium.ready;
         const state = structuredClone(mockConnect);
         state.controller.state.s = '1';
-        fetchMock.mockResolvedValueOnce(
-            Response.json(state, { status: 200 })
-        );
+        fetchMock.mockResolvedValueOnce(Response.json(state, { status: 200 }));
 
         const client = new SignifyClient(url, bran, Tier.low, boot_url);
-        const approveDelegation = vitest.spyOn(
-            client,
-            'approveDelegation'
-        );
+        const approveDelegation = vitest.spyOn(client, 'approveDelegation');
 
         await client.connect();
 
@@ -162,9 +169,9 @@ describe('SignifyClient', () => {
             'approveDelegation'
         );
         approval.mockImplementation(function (this: Controller, agent) {
-            const signatures = originalApproval.call(this, agent);
-            this.serder.sad.a[0].d = 'EWrongAgentDelegationSeal';
-            return signatures;
+            const result = originalApproval.call(this, agent);
+            result.event.sad.a[0].d = 'EWrongAgentDelegationSeal';
+            return result;
         });
 
         const client = new SignifyClient(url, bran, Tier.low, boot_url);
@@ -178,10 +185,9 @@ describe('SignifyClient', () => {
         }
 
         assert.equal(
-            fetchMock.mock.calls.slice(firstCall).some(
-                ([input]) =>
-                    input.toString().includes('?type=ixn')
-            ),
+            fetchMock.mock.calls
+                .slice(firstCall)
+                .some(([input]) => input.toString().includes('?type=ixn')),
             false
         );
         assert.equal(client.authn, null);
