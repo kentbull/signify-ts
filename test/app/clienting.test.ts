@@ -23,9 +23,10 @@ import {
     HEADER_SIG_INPUT,
     HEADER_SIG_TIME,
 } from '../../src/keri/core/httping.ts';
+import type { HabState } from '../../src/keri/core/keyState.ts';
 import { Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
-import { createMockFetch, mockConnect } from './test-utils.ts';
+import { createMockFetch, mockConnect, mockGetAID } from './test-utils.ts';
 
 const fetchMock = createMockFetch();
 
@@ -224,6 +225,56 @@ describe('SignifyClient', () => {
         );
         assert.equal(client.authn, null);
         assert.equal(client.manager, null);
+    });
+
+    it('clears and replaces signer caches at client boundaries', async () => {
+        await libsodium.ready;
+
+        const client = new SignifyClient(
+            url,
+            bran,
+            Tier.low,
+            boot_url,
+            [],
+            true
+        );
+        await client.connect();
+
+        const firstFactory = client.manager!;
+        firstFactory.get(mockGetAID as unknown as HabState);
+        const firstClear = vitest.spyOn(firstFactory, 'clearSignerCache');
+        const state = vitest
+            .spyOn(client, 'state')
+            .mockRejectedValueOnce(new Error('state unavailable'));
+
+        try {
+            await expect(client.connect()).rejects.toThrow('state unavailable');
+            expect(firstClear).toHaveBeenCalledOnce();
+            expect(client.manager).toBeNull();
+
+            await client.connect();
+            const secondFactory = client.manager!;
+            expect(secondFactory).not.toBe(firstFactory);
+
+            const secondClear = vitest.spyOn(secondFactory, 'clearSignerCache');
+            const rotate = vitest
+                .spyOn(client.controller, 'rotate')
+                .mockImplementation(() => {
+                    throw new Error('controller rotation failed');
+                });
+            try {
+                await expect(
+                    client.rotate('abcdefghijk0123456789', [])
+                ).rejects.toThrow('controller rotation failed');
+                expect(secondClear).toHaveBeenCalledOnce();
+            } finally {
+                rotate.mockRestore();
+                secondClear.mockRestore();
+            }
+        } finally {
+            state.mockRestore();
+            firstClear.mockRestore();
+        }
     });
 
     it('Signed fetch', async () => {

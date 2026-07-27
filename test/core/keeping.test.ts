@@ -4,6 +4,8 @@ import {
     Controller,
     Diger,
     GroupIdentifierManager,
+    type HabState,
+    IdentifierManagerFactory,
     MtrDex,
     RandyIdentifierManager,
     Salter,
@@ -222,7 +224,218 @@ describe('IdentifierManagerFactory signer cache', () => {
             stretch.mockRestore();
         }
     });
+
+    it('keeps caching opt-in and reuses a verified multi-key establishment', async () => {
+        await libsodium.ready;
+
+        const bran = '0123456789abcdefghijk';
+        const aid = await createMockIdentifierState('aid1', bran, {
+            count: 3,
+            ncount: 3,
+        });
+        const salter = new Controller(bran, Tier.low).salter;
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            const uncached = new IdentifierManagerFactory(salter);
+            uncached.get(aid);
+            stretch.mockClear();
+            uncached.get(aid);
+            expect(stretch).toHaveBeenCalled();
+
+            const cached = new IdentifierManagerFactory(salter, [], true);
+            stretch.mockClear();
+            const cold = cached.get(aid);
+            expect(cold.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+            expect(stretch).toHaveBeenCalled();
+
+            stretch.mockClear();
+            const warm = cached.get(aid);
+            expect(warm).not.toBe(cold);
+            expect(warm.signers[0]).not.toBe(cold.signers[0]);
+            expect(stretch).not.toHaveBeenCalled();
+
+            const interaction = structuredClone(aid) as HabState;
+            interaction.state.s = '1';
+            interaction.state.d = 'EInteractionHead';
+            const afterInteraction = cached.get(interaction);
+            expect(afterInteraction).not.toBe(warm);
+            expect(stretch).not.toHaveBeenCalled();
+            expect(JSON.stringify(cached)).not.toContain(cold.signers[0].qb64);
+        } finally {
+            stretch.mockRestore();
+        }
+    });
+
+    it('rejects invalid or conflicting observations without replacing the verified entry', async () => {
+        await libsodium.ready;
+
+        const bran = '0123456789abcdefghijk';
+        const aid = await createMockIdentifierState('aid1', bran, {
+            count: 3,
+            ncount: 3,
+        });
+        if (!('salty' in aid)) {
+            throw new Error('Expected a salty identifier fixture.');
+        }
+
+        const factory = new IdentifierManagerFactory(
+            new Controller(bran, Tier.low).salter,
+            [],
+            true
+        );
+        const accepted = factory.get(aid);
+        const signerQb64 = accepted.signers[0].qb64;
+
+        const wrongPrefix = structuredClone(aid) as HabState;
+        wrongPrefix.prefix = 'EWrongPrefix';
+
+        const invalidSequence = structuredClone(aid) as HabState;
+        invalidSequence.state.ee.s = '0x1';
+
+        const conflictingDigest = structuredClone(aid) as HabState;
+        conflictingDigest.state.ee.d = 'EConflictingDigest';
+
+        const conflictingKeys = structuredClone(aid) as HabState;
+        conflictingKeys.state.k = [...conflictingKeys.state.k].reverse();
+
+        const invalidHigher = structuredClone(aid) as HabState;
+        invalidHigher.state.ee.s = '1';
+        invalidHigher.state.ee.d = 'EHigherEstablishment';
+        invalidHigher.state.k = [...invalidHigher.state.k].reverse();
+
+        const errors = [
+            captureError(() => factory.get(wrongPrefix)),
+            captureError(() => factory.get(invalidSequence)),
+            captureError(() => factory.get(conflictingDigest)),
+            captureError(() => factory.get(conflictingKeys)),
+            captureError(() => factory.get(invalidHigher)),
+        ];
+        for (const message of errors) {
+            expect(message).not.toContain(aid.salty.sxlt);
+            expect(message).not.toContain(signerQb64);
+        }
+
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+        try {
+            const stillWarm = factory.get(aid);
+            expect(
+                stillWarm.signers.map((signer) => signer.verfer.qb64)
+            ).toEqual(aid.state.k);
+            expect(stretch).not.toHaveBeenCalled();
+        } finally {
+            stretch.mockRestore();
+        }
+    });
+
+    it('replaces only with a verified numerically newer establishment', async () => {
+        await libsodium.ready;
+
+        const bran = '0123456789abcdefghijk';
+        const aid = await createMockIdentifierState('aid1', bran);
+        if (!('salty' in aid)) {
+            throw new Error('Expected a salty identifier fixture.');
+        }
+
+        const acceptedAtF = structuredClone(aid) as HabState;
+        acceptedAtF.state.ee.s = 'f';
+        const factory = new IdentifierManagerFactory(
+            new Controller(bran, Tier.low).salter,
+            [],
+            true
+        );
+        factory.get(acceptedAtF);
+
+        const operation = factory.get(acceptedAtF) as SaltyIdentifierManager;
+        const [rotatedKeys] = await operation.rotate(
+            [...aid.salty.ncodes],
+            true
+        );
+        const acceptedAtTen = structuredClone(acceptedAtF) as HabState;
+        if (!('salty' in acceptedAtTen)) {
+            throw new Error('Expected a salty identifier fixture.');
+        }
+        acceptedAtTen.salty = operation.params() as typeof acceptedAtTen.salty;
+        acceptedAtTen.state.ee.s = '10';
+        acceptedAtTen.state.ee.d = 'ENumericallyNewerEstablishment';
+        acceptedAtTen.state.k = rotatedKeys;
+
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+        try {
+            const replacement = factory.get(acceptedAtTen);
+            expect(
+                replacement.signers.map((signer) => signer.verfer.qb64)
+            ).toEqual(rotatedKeys);
+            expect(stretch).toHaveBeenCalled();
+
+            expect(() => factory.get(acceptedAtF)).toThrow(
+                'establishment regression'
+            );
+        } finally {
+            stretch.mockRestore();
+        }
+    });
+
+    it('evicts the least-recently-used signer set and clears the cache', async () => {
+        await libsodium.ready;
+
+        const bran = '0123456789abcdefghijk';
+        const aid = await createMockIdentifierState('aid1', bran);
+        const factory = new IdentifierManagerFactory(
+            new Controller(bran, Tier.low).salter,
+            [],
+            true
+        );
+        const states = Array.from({ length: 17 }, (_, index) => {
+            const state = structuredClone(aid) as HabState;
+            state.prefix = `ESyntheticPrefix${index}`;
+            state.state.i = state.prefix;
+            return state;
+        });
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            for (const state of states.slice(0, 16)) {
+                factory.get(state);
+            }
+
+            stretch.mockClear();
+            factory.get(states[0]);
+            expect(stretch).not.toHaveBeenCalled();
+
+            factory.get(states[16]);
+            expect(stretch).toHaveBeenCalled();
+
+            stretch.mockClear();
+            factory.get(states[0]);
+            expect(stretch).not.toHaveBeenCalled();
+
+            factory.get(states[1]);
+            expect(stretch).toHaveBeenCalled();
+
+            factory.clearSignerCache();
+            stretch.mockClear();
+            factory.get(states[0]);
+            expect(stretch).toHaveBeenCalled();
+        } finally {
+            stretch.mockRestore();
+        }
+    }, 30000);
 });
+
+function captureError(action: () => void): string {
+    let thrown: unknown;
+    try {
+        action();
+    } catch (error) {
+        thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    return (thrown as Error).message;
+}
 
 function groupSigningFixtures() {
     const salter = new Salter({ raw: b('0123456789abcdef') });

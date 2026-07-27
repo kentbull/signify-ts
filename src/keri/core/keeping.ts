@@ -54,6 +54,13 @@ type SaltySignerSnapshot = Readonly<{
     signerQb64s: readonly string[];
 }>;
 
+type CachedSaltySignerSet = Readonly<{
+    establishmentSequence: number;
+    establishmentDigest: string;
+    publicKeys: readonly string[];
+    signerQb64s: readonly string[];
+}>;
+
 type SaltyManagerInitialization = Readonly<{
     pidx: number;
     kidx: number;
@@ -70,6 +77,8 @@ type SaltyManagerInitialization = Readonly<{
     bran: string | undefined;
     sxlt: string | undefined;
 }>;
+
+const MAX_CACHED_SIGNER_SETS = 16;
 
 export interface RandyManagerParams extends IdentifierManagerParams {
     nxts?: string[];
@@ -123,16 +132,19 @@ export interface IdentifierManager<
  */
 export class IdentifierManagerFactory {
     private modules: Record<string, ExternalModuleType> = {};
+    #saltySignerCache = new Map<string, CachedSaltySignerSet>();
 
     /**
      * Creates a factory for generating IdentifierManagers. Requires a salt to be specified.
      * Allows external key management modules to be configured.
      * @param salter
      * @param externalModules
+     * @param cacheSigners whether to retain verified salty signer snapshots
      */
     constructor(
         private salter: Salter,
-        externalModules: ExternalModule[] = []
+        externalModules: ExternalModule[] = [],
+        private cacheSigners = false
     ) {
         this.salter = salter;
 
@@ -213,23 +225,7 @@ export class IdentifierManagerFactory {
      */
     get(aid: HabState): IdentifierManager {
         if (Algos.salty in aid) {
-            return new SaltyIdentifierManager(
-                this.salter,
-                aid.salty.pidx,
-                aid.salty.kidx,
-                aid.salty.tier,
-                aid.salty.transferable,
-                aid.salty.stem,
-                undefined,
-                undefined,
-                aid.salty.icodes,
-                undefined,
-                undefined,
-                aid.salty.ncodes,
-                aid.salty.dcode,
-                undefined,
-                aid.salty.sxlt
-            );
+            return this.getSalty(aid as HabState & { salty: SaltyKeyState });
         } else if (Algos.randy in aid) {
             return new RandyIdentifierManager(
                 this.salter,
@@ -265,6 +261,163 @@ export class IdentifierManagerFactory {
             throw new Error('No algo specified');
         }
     }
+
+    /**
+     * Drop all cache-owned references to salty signer snapshots.
+     *
+     * JavaScript cannot guarantee physical zeroization of immutable strings
+     * or garbage-collected objects. Managers already returned to callers
+     * remain usable.
+     */
+    clearSignerCache(): void {
+        this.#saltySignerCache.clear();
+    }
+
+    private getSalty(
+        aid: HabState & { salty: SaltyKeyState }
+    ): SaltyIdentifierManager {
+        if (!this.cacheSigners) {
+            return SaltyIdentifierManager.fromState(this.salter, aid.salty);
+        }
+
+        const observation = this.validateSaltyObservation(aid);
+        const cached = this.#saltySignerCache.get(aid.prefix);
+        if (cached !== undefined) {
+            if (
+                observation.establishmentSequence < cached.establishmentSequence
+            ) {
+                throw new Error(
+                    `Salty signer cache rejected establishment regression for ${aid.prefix}: ${observation.establishmentSequence} is older than ${cached.establishmentSequence}.`
+                );
+            }
+
+            if (
+                observation.establishmentSequence ===
+                cached.establishmentSequence
+            ) {
+                if (
+                    observation.establishmentDigest !==
+                    cached.establishmentDigest
+                ) {
+                    throw new Error(
+                        `Salty signer cache rejected conflicting establishment digest for ${aid.prefix} at sequence ${observation.establishmentSequence}.`
+                    );
+                }
+                if (!arraysEqual(observation.publicKeys, cached.publicKeys)) {
+                    throw new Error(
+                        `Salty signer cache rejected conflicting public keys for ${aid.prefix} at sequence ${observation.establishmentSequence}.`
+                    );
+                }
+
+                this.#saltySignerCache.delete(aid.prefix);
+                this.#saltySignerCache.set(aid.prefix, cached);
+                return SaltyIdentifierManager.fromState(
+                    this.salter,
+                    aid.salty,
+                    cached
+                );
+            }
+        }
+
+        const manager = SaltyIdentifierManager.fromState(
+            this.salter,
+            aid.salty
+        );
+        const derivedPublicKeys = manager.signers.map(
+            (signer) => signer.verfer.qb64
+        );
+        if (!arraysEqual(derivedPublicKeys, observation.publicKeys)) {
+            throw new Error(
+                `Derived salty signer keys do not match accepted state for ${aid.prefix} at establishment sequence ${observation.establishmentSequence}.`
+            );
+        }
+
+        const entry = Object.freeze({
+            establishmentSequence: observation.establishmentSequence,
+            establishmentDigest: observation.establishmentDigest,
+            publicKeys: Object.freeze([...observation.publicKeys]),
+            signerQb64s: Object.freeze(
+                manager.signers.map((signer) => signer.qb64)
+            ),
+        });
+        this.#saltySignerCache.delete(aid.prefix);
+        this.#saltySignerCache.set(aid.prefix, entry);
+        if (this.#saltySignerCache.size > MAX_CACHED_SIGNER_SETS) {
+            const oldestPrefix = this.#saltySignerCache.keys().next().value;
+            if (oldestPrefix !== undefined) {
+                this.#saltySignerCache.delete(oldestPrefix);
+            }
+        }
+
+        return manager;
+    }
+
+    private validateSaltyObservation(aid: HabState): {
+        establishmentSequence: number;
+        establishmentDigest: string;
+        publicKeys: readonly string[];
+    } {
+        if (typeof aid.prefix !== 'string' || aid.prefix.length === 0) {
+            throw new Error(
+                'Salty signer cache requires a non-empty identifier prefix.'
+            );
+        }
+        if (aid.state.i !== aid.prefix) {
+            throw new Error(
+                `Salty signer cache prefix ${aid.prefix} does not match key state identifier ${aid.state.i}.`
+            );
+        }
+
+        const sequence = aid.state.ee.s;
+        if (typeof sequence !== 'string' || !/^[0-9a-fA-F]+$/.test(sequence)) {
+            throw new Error(
+                `Salty signer cache requires a hexadecimal establishment sequence for ${aid.prefix}.`
+            );
+        }
+        const establishmentSequence = Number.parseInt(sequence, 16);
+        if (
+            !Number.isSafeInteger(establishmentSequence) ||
+            establishmentSequence < 0
+        ) {
+            throw new Error(
+                `Salty signer cache establishment sequence is out of range for ${aid.prefix}.`
+            );
+        }
+
+        const establishmentDigest = aid.state.ee.d;
+        if (
+            typeof establishmentDigest !== 'string' ||
+            establishmentDigest.length === 0
+        ) {
+            throw new Error(
+                `Salty signer cache requires an establishment digest for ${aid.prefix}.`
+            );
+        }
+        if (
+            !Array.isArray(aid.state.k) ||
+            !aid.state.k.every((key) => typeof key === 'string')
+        ) {
+            throw new Error(
+                `Salty signer cache requires ordered public keys for ${aid.prefix}.`
+            );
+        }
+
+        return {
+            establishmentSequence,
+            establishmentDigest,
+            publicKeys: aid.state.k,
+        };
+    }
+}
+
+function arraysEqual(
+    left: readonly string[],
+    right: readonly string[]
+): boolean {
+    return (
+        left.length === right.length &&
+        left.every((value, index) => value === right[index])
+    );
 }
 
 export class SaltyIdentifierManager implements IdentifierManager {
@@ -349,10 +502,10 @@ export class SaltyIdentifierManager implements IdentifierManager {
                 tier: state.tier,
                 transferable: state.transferable,
                 stem: state.stem,
-                code: state.icodes?.[0] ?? MtrDex.Ed25519_Seed,
+                code: MtrDex.Ed25519_Seed,
                 count: state.icodes?.length ?? 1,
                 icodes: state.icodes,
-                ncode: state.ncodes?.[0] ?? MtrDex.Ed25519_Seed,
+                ncode: MtrDex.Ed25519_Seed,
                 ncount: state.ncodes?.length ?? 1,
                 ncodes: state.ncodes,
                 dcode: state.dcode,

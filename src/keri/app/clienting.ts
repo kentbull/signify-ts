@@ -83,13 +83,15 @@ export class SignifyClient {
      * @param {Tier} tier Security tier for generating keys of the client AID (high | mewdium | low)
      * @param {string} bootUrl KERIA boot interface URL
      * @param {ExternalModule[]} externalModules list of external modules to load
+     * @param {boolean} cacheSigners whether to retain verified salty signer snapshots
      */
     constructor(
         url: string,
         bran: string,
         tier: Tier = Tier.low,
         bootUrl: string = DEFAULT_BOOT_URL,
-        externalModules: ExternalModule[] = []
+        externalModules: ExternalModule[] = [],
+        private cacheSigners = false
     ) {
         this.url = url;
         if (bran.length < 21) {
@@ -262,6 +264,9 @@ export class SignifyClient {
         reuseController: boolean,
         options: ConnectionOptions
     ) {
+        this.manager?.clearSignerCache();
+        this.manager = null;
+
         const state = await this.state(options);
         this.pidx = state.pidx;
         if (reuseController) {
@@ -306,7 +311,8 @@ export class SignifyClient {
 
         this.manager = new IdentifierManagerFactory(
             this.controller.salter,
-            this.exteralModules
+            this.exteralModules,
+            this.cacheSigners
         );
         this.authn = new Authenticater(
             this.controller.signer,
@@ -513,6 +519,7 @@ export class SignifyClient {
      * @returns {Promise<Response>} A promise to the result of the rotation
      */
     async rotate(nbran: string, aids: string[]): Promise<Response> {
+        this.manager?.clearSignerCache();
         const data = this.controller.rotate(nbran, aids);
         return await fetch(this.url + '/agent/' + this.controller.pre, {
             method: 'PUT',
