@@ -40,7 +40,7 @@ import signify, {
 } from 'signify-ts';
 import { RetryOptions, retry } from './retry.ts';
 import assert from 'assert';
-import { resolveEnvironment } from './resolve-env.ts';
+import { resolveEnvironment, type TestEnvironment } from './resolve-env.ts';
 
 export interface Aid {
     name: string;
@@ -52,7 +52,21 @@ export interface Notification {
     i: string;
     dt: string;
     r: boolean;
-    a: { r: string; d?: string; m?: string };
+    a: {
+        r: string;
+        d?: string;
+        m?: string;
+        src?: string;
+        delpre?: string;
+        aids?: string[];
+        ked?: {
+            t?: string;
+            i?: string;
+            s?: string;
+            d?: string;
+            di?: string;
+        };
+    };
 }
 
 export interface NotificationOptions extends RetryOptions {
@@ -248,17 +262,17 @@ export async function getOrCreateAID(
  */
 export async function getOrCreateClient(
     bran: string | undefined = undefined,
-    externalModule: ExternalModule[] = []
+    externalModule: ExternalModule[] = [],
+    keria: Pick<TestEnvironment, 'url' | 'bootUrl'> = resolveEnvironment()
 ): Promise<SignifyClient> {
-    const env = resolveEnvironment();
     await ready();
     bran ??= randomPasscode();
     bran = bran.padEnd(21, '_');
     const client = new SignifyClient(
-        env.url,
+        keria.url,
         bran,
         Tier.low,
-        env.bootUrl,
+        keria.bootUrl,
         externalModule
     );
     try {

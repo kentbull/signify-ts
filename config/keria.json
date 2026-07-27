@@ -2,7 +2,7 @@
     "dt": "2023-12-01T10:05:25.062609+00:00",
     "keria": {
         "dt": "2023-12-01T10:05:25.062609+00:00",
-        "curls": ["http://keria:3902/"]
+        "curls": []
     },
     "iurls": [
         "http://witness-demo:5642/oobi/BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha/controller",

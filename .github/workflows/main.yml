@@ -57,7 +57,7 @@ jobs:
     strategy:
       matrix:
         os: ['ubuntu-latest']
-        keria-version: ['0.4.0', 'latest']
+        keria-version: ['0.4.0', 'main']
         node-version: ['20']
     env:
       KERIA_IMAGE_TAG: ${{ matrix.keria-version }}
@@ -73,11 +73,29 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+      - name: Checkout KERIA main integration baseline
+        if: matrix.keria-version == 'main'
+        uses: actions/checkout@v4
+        with:
+          repository: WebOfTrust/keria
+          ref: 86e21cbdf98dcc75817e16708879c3c5a9b41cb8
+          path: .keria-integration
+      - name: Build KERIA main integration image
+        if: matrix.keria-version == 'main'
+        run: docker build --tag weboftrust/keria:main --file .keria-integration/images/keria.dockerfile .keria-integration
       - name: Print docker compose config
         run: docker compose config
-      - name: Start dependencies
+      - name: Start released dependencies
+        if: matrix.keria-version == '0.4.0'
         run: docker compose up --wait --pull always
+      - name: Start KERIA main dependencies
+        if: matrix.keria-version == 'main'
+        run: docker compose up --wait
+      - name: Run KERIA 0.4.0-compatible integration tests
+        if: matrix.keria-version == '0.4.0'
+        run: npm run test:integration -- --exclude '**/delegation-multisig.test.ts'
       - name: Run integration test
+        if: matrix.keria-version != '0.4.0'
         run: npm run test:integration
       - name: Print logs
         run: docker compose logs

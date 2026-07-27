@@ -7,7 +7,6 @@ import {
     createTimestamp,
     assertNoNotifications,
     getOrCreateClient,
-    getOrCreateContact,
     markAndRemoveNotification,
     resolveOobi,
     waitForNotifications,
@@ -28,9 +27,41 @@ const delegator2Name = 'delegator2';
 const delegatee1Name = 'delegatee1';
 const delegatee2Name = 'delegatee2';
 
+function groupAgentOobi(
+    memberOobi: string,
+    groupPrefix: string,
+    agentPrefix: string
+): string {
+    const oobi = new URL(memberOobi);
+    oobi.pathname = `/oobi/${groupPrefix}/agent/${agentPrefix}`;
+    oobi.search = '';
+    oobi.hash = '';
+    return oobi.toString();
+}
+
+const keriaInstances = [
+    {
+        url: 'http://127.0.0.1:3901',
+        bootUrl: 'http://127.0.0.1:3903',
+    },
+    {
+        url: 'http://127.0.0.1:4901',
+        bootUrl: 'http://127.0.0.1:4903',
+    },
+    {
+        url: 'http://127.0.0.1:5901',
+        bootUrl: 'http://127.0.0.1:5903',
+    },
+    {
+        url: 'http://127.0.0.1:6901',
+        bootUrl: 'http://127.0.0.1:6903',
+    },
+] as const;
+
 test('delegation-multisig', async () => {
     await signify.ready();
-    // Boot three clients
+    // Use one controller per KERIA instance until Agency routing supports
+    // multiple local members of the same multisig group.
     const [
         delegator1Client,
         delegator2Client,
@@ -38,10 +69,10 @@ test('delegation-multisig', async () => {
         delegatee2Client,
     ] = await step('Creating single sig clients', async () => {
         return await Promise.all([
-            getOrCreateClient(),
-            getOrCreateClient(),
-            getOrCreateClient(),
-            getOrCreateClient(),
+            getOrCreateClient(undefined, [], keriaInstances[0]),
+            getOrCreateClient(undefined, [], keriaInstances[1]),
+            getOrCreateClient(undefined, [], keriaInstances[2]),
+            getOrCreateClient(undefined, [], keriaInstances[3]),
         ]);
     });
 
@@ -69,26 +100,54 @@ test('delegation-multisig', async () => {
 
     await step('Resolving OOBIs', async () => {
         await Promise.all([
-            resolveOobi(
-                delegator1Client,
-                delegator2Oobi.oobis[0],
-                delegator2Name
-            ),
-            resolveOobi(
-                delegator2Client,
-                delegator1Oobi.oobis[0],
-                delegator1Name
-            ),
-            resolveOobi(
-                delegatee1Client,
-                delegatee2Oobi.oobis[0],
-                delegatee2Name
-            ),
-            resolveOobi(
-                delegatee2Client,
-                delegatee1Oobi.oobis[0],
-                delegatee1Name
-            ),
+            (async () => {
+                await resolveOobi(
+                    delegator1Client,
+                    delegator2Oobi.oobis[0],
+                    delegator2Name
+                );
+                await resolveOobi(
+                    delegator1Client,
+                    delegatee1Oobi.oobis[0],
+                    delegatee1Name
+                );
+                await resolveOobi(
+                    delegator1Client,
+                    delegatee2Oobi.oobis[0],
+                    delegatee2Name
+                );
+            })(),
+            (async () => {
+                await resolveOobi(
+                    delegator2Client,
+                    delegator1Oobi.oobis[0],
+                    delegator1Name
+                );
+                await resolveOobi(
+                    delegator2Client,
+                    delegatee1Oobi.oobis[0],
+                    delegatee1Name
+                );
+                await resolveOobi(
+                    delegator2Client,
+                    delegatee2Oobi.oobis[0],
+                    delegatee2Name
+                );
+            })(),
+            (async () => {
+                await resolveOobi(
+                    delegatee1Client,
+                    delegatee2Oobi.oobis[0],
+                    delegatee2Name
+                );
+            })(),
+            (async () => {
+                await resolveOobi(
+                    delegatee2Client,
+                    delegatee1Oobi.oobis[0],
+                    delegatee1Name
+                );
+            })(),
         ]);
     });
     console.log(
@@ -152,9 +211,9 @@ test('delegation-multisig', async () => {
     assert.equal(adelegatorGroupName1.name, adelegatorGroupName2.name);
     const adelegatorGroupName = adelegatorGroupName1;
 
-    //Resolve delegator OOBI
-    const delegatorGroupNameOobi = await step(
-        `Add and resolve delegator OOBI ${delegatorGroupName}(${adelegatorGroupName.prefix})`,
+    // Resolve one group OOBI through each member's KERIA instance.
+    const delegatorGroupOobis = await step(
+        `Add delegator end roles for ${delegatorGroupName}(${adelegatorGroupName.prefix})`,
         async () => {
             const timestamp = createTimestamp();
             const opList1 = await addEndRoleMultisig(
@@ -185,39 +244,31 @@ test('delegation-multisig', async () => {
             await assertNoNotifications(delegator1Client, '/multisig/rpy');
             await assertNoNotifications(delegator2Client, '/multisig/rpy');
 
-            const [odelegatorGroupName1, odelegatorGroupName2] =
-                await Promise.all([
-                    delegator1Client
-                        .oobis()
-                        .get(adelegatorGroupName.name, 'agent'),
-                    delegator2Client
-                        .oobis()
-                        .get(adelegatorGroupName.name, 'agent'),
-                ]);
+            const oobis = [
+                groupAgentOobi(
+                    delegator1Oobi.oobis[0],
+                    adelegatorGroupName.prefix,
+                    delegator1Client.agent!.pre
+                ),
+                groupAgentOobi(
+                    delegator2Oobi.oobis[0],
+                    adelegatorGroupName.prefix,
+                    delegator2Client.agent!.pre
+                ),
+            ];
+            assert.equal(new Set(oobis).size, 2);
 
-            assert.equal(odelegatorGroupName1.role, odelegatorGroupName2.role);
-            assert.equal(
-                odelegatorGroupName1.oobis[0],
-                odelegatorGroupName2.oobis[0]
-            );
-
-            return odelegatorGroupName1.oobis[0];
+            return oobis;
         }
     );
 
-    const oobiGtor = delegatorGroupNameOobi.split('/agent/')[0];
-    await Promise.all([
-        getOrCreateContact(
-            delegatee1Client,
-            adelegatorGroupName.name,
-            oobiGtor
-        ),
-        getOrCreateContact(
-            delegatee2Client,
-            adelegatorGroupName.name,
-            oobiGtor
-        ),
-    ]);
+    await Promise.all(
+        [delegatee1Client, delegatee2Client].map(async (client) => {
+            for (const oobi of delegatorGroupOobis) {
+                await resolveOobi(client, oobi, adelegatorGroupName.name);
+            }
+        })
+    );
 
     const opDelegatee1 = await step(
         `${delegatee1Name}(${delegatee1Aid.prefix}) initiated delegatee multisig, waiting for ${delegatee2Name}(${delegatee2Aid.prefix}) to join...`,
@@ -264,6 +315,56 @@ test('delegation-multisig', async () => {
     const teepre = opDelegatee1.name.split('.')[1];
     assert.equal(opDelegatee2.name.split('.')[1], teepre);
     console.log('Delegatee prefix:', teepre);
+
+    await step('delegators receive delegation requests', async () => {
+        const notificationOptions = {
+            minCount: 1,
+            maxSleep: 10000,
+            minSleep: 1000,
+            maxRetries: undefined,
+            timeout: 60000,
+        };
+        const [requests1, requests2] = await Promise.all([
+            waitForNotifications(
+                delegator1Client,
+                '/delegate/request',
+                notificationOptions
+            ),
+            waitForNotifications(
+                delegator2Client,
+                '/delegate/request',
+                notificationOptions
+            ),
+        ]);
+        // KERIpy elects the group member at signing index 0 to perform
+        // delegation and witness messaging.
+        const expectedSource = delegatee1Client.agent!.pre;
+
+        for (const requests of [requests1, requests2]) {
+            assert.equal(requests.length, 1);
+
+            for (const request of requests) {
+                assert.equal(request.a.src, expectedSource);
+                assert.equal(request.a.delpre, torpre);
+                assert.deepEqual(request.a.aids, []);
+                assert(request.a.ked);
+                assert.equal(request.a.ked.t, 'dip');
+                assert.equal(request.a.ked.i, teepre);
+                assert.equal(request.a.ked.s, '0');
+                assert.equal(request.a.ked.d, teepre);
+                assert.equal(request.a.ked.di, torpre);
+            }
+        }
+
+        await Promise.all([
+            ...requests1.map((request) =>
+                markAndRemoveNotification(delegator1Client, request)
+            ),
+            ...requests2.map((request) =>
+                markAndRemoveNotification(delegator2Client, request)
+            ),
+        ]);
+    });
 
     await step('delegator anchors/approves delegation', async () => {
         // GEDA anchors delegation with an interaction event.

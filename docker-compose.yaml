@@ -8,6 +8,19 @@ x-python-env: &python-env
     PYTHONUNBUFFERED: 1
     PYTHONIOENCODING: UTF-8
 
+x-keria-environment: &keria-environment
+    KERI_AGENT_CORS: 1
+    <<: *python-env
+
+x-keria-service: &keria-service
+    image: ${KERIA_IMAGE:-weboftrust/keria}:${KERIA_IMAGE_TAG:-0.4.0}
+    volumes:
+        - ./config/keria.json:/keria/config/keri/cf/keria.json
+    command: start --config-dir /keria/config --config-file keria --name keria
+    healthcheck:
+        test: wget --spider http://127.0.0.1:3902/spec.yaml
+        <<: *healthcheck
+
 services:
     vlei-server:
         image: gleif/vlei:1.0.3
@@ -21,20 +34,44 @@ services:
             - 7723:7723
 
     keria:
-        image: ${KERIA_IMAGE:-weboftrust/keria}:${KERIA_IMAGE_TAG:-0.4.0}
+        <<: *keria-service
         environment:
-            KERI_AGENT_CORS: 1
-            <<: *python-env
-        volumes:
-            - ./config/keria.json:/keria/config/keri/cf/keria.json
-        command: start --config-dir /keria/config --config-file keria --name keria
-        healthcheck:
-            test: wget --spider http://keria:3902/spec.yaml
-            <<: *healthcheck
+            <<: *keria-environment
+            KERIA_CURLS: http://keria:3902/
         ports:
             - 3901:3901
             - 3902:3902
             - 3903:3903
+
+    keria2:
+        <<: *keria-service
+        environment:
+            <<: *keria-environment
+            KERIA_CURLS: http://keria2:3902/
+        ports:
+            - 4901:3901
+            - 4902:3902
+            - 4903:3903
+
+    keria3:
+        <<: *keria-service
+        environment:
+            <<: *keria-environment
+            KERIA_CURLS: http://keria3:3902/
+        ports:
+            - 5901:3901
+            - 5902:3902
+            - 5903:3903
+
+    keria4:
+        <<: *keria-service
+        environment:
+            <<: *keria-environment
+            KERIA_CURLS: http://keria4:3902/
+        ports:
+            - 6901:3901
+            - 6902:3902
+            - 6903:3903
 
     witness-demo:
         image: ${KERI_IMAGE:-weboftrust/keri}:${KERI_IMAGE_TAG:-1.2.13}
