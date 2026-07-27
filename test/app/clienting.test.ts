@@ -24,7 +24,8 @@ import {
     HEADER_SIG_TIME,
 } from '../../src/keri/core/httping.ts';
 import type { HabState } from '../../src/keri/core/keyState.ts';
-import { Tier } from '../../src/keri/core/salter.ts';
+import type { IdentifierManager } from '../../src/keri/core/keeping.ts';
+import { Salter, Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
 import { createMockFetch, mockConnect, mockGetAID } from './test-utils.ts';
 
@@ -281,7 +282,14 @@ describe('SignifyClient', () => {
         await libsodium.ready;
         await libsodium.ready;
         const bran = '0123456789abcdefghijk';
-        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+        const client = new SignifyClient(
+            url,
+            bran,
+            Tier.low,
+            boot_url,
+            [],
+            true
+        );
 
         await client.connect();
 
@@ -410,7 +418,17 @@ describe('SignifyClient', () => {
         );
 
         const aid = await client.identifiers().get('aid1');
-        const keeper = client.manager!.get(aid);
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+        let keeper: IdentifierManager | undefined;
+        try {
+            keeper = client.manager!.get(aid);
+            expect(stretch).not.toHaveBeenCalled();
+        } finally {
+            stretch.mockRestore();
+        }
+        if (keeper === undefined) {
+            throw new Error('Expected a signer-cached identifier manager.');
+        }
         const signer = keeper.signers[0];
         const created = lastHeaders
             .get(HEADER_SIG_INPUT)

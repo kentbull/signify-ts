@@ -75,6 +75,8 @@ describe('IdentifierManager signing', () => {
         // only, so ondex is intentionally suppressed.
         await group.sign(ser, true, undefined, undefined, false);
 
+        expect(manager.get).toHaveBeenCalledOnce();
+        expect(manager.get).toHaveBeenCalledWith(mhab);
         expect(memberSign).toHaveBeenCalledWith(ser, true, [0], [undefined]);
     });
 

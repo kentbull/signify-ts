@@ -16,8 +16,8 @@ import { step } from './utils/test-step.ts';
 test('multisig inception', async () => {
     await signify.ready();
     const [client1, client2] = await Promise.all([
-        getOrCreateClient(),
-        getOrCreateClient(),
+        getOrCreateClient(undefined, [], true),
+        getOrCreateClient(undefined, [], true),
     ]);
 
     const [[aid1], [aid2]] = await Promise.all([

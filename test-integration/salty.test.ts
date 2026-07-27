@@ -7,7 +7,7 @@ import {
 } from './utils/test-util.ts';
 
 test('salty', async () => {
-    const client1 = await getOrCreateClient();
+    const client1 = await getOrCreateClient(undefined, [], true);
 
     let icpResult = await client1
         .identifiers()

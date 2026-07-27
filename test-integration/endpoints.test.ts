@@ -11,7 +11,7 @@ let client: SignifyClient;
 let cid: string;
 
 beforeAll(async () => {
-    client = await getOrCreateClient();
+    client = await getOrCreateClient(undefined, [], true);
     const icpResult = await client.identifiers().create('aid1');
     cid = (await waitOperation(client, await icpResult.op())).response.i;
 });

@@ -15,6 +15,7 @@ import {
     IdentifierManagerFactory,
     KeyState,
     randomPasscode,
+    Salter,
     Siger,
     Tier,
     Verfer,
@@ -32,7 +33,11 @@ export class MockClient implements IdentifierDeps {
 
     constructor(bran: string) {
         this.controller = new Controller(bran, Tier.low);
-        this.manager = new IdentifierManagerFactory(this.controller.salter);
+        this.manager = new IdentifierManagerFactory(
+            this.controller.salter,
+            [],
+            true
+        );
     }
 
     identifiers() {
@@ -216,6 +221,7 @@ describe('Aiding', () => {
 
     it('Can rotate salty identifier', async () => {
         const aid1 = await createMockIdentifierState('aid1', bran, {});
+        client.manager.get(aid1);
         client.fetch.mockResolvedValueOnce(Response.json(aid1));
         client.fetch.mockResolvedValueOnce(Response.json({}));
 
@@ -507,13 +513,19 @@ describe('Aiding', () => {
                 states,
                 rstates,
             });
+            client.manager.get(member1);
 
             client.fetch.mockResolvedValueOnce(Response.json(group));
             client.fetch.mockResolvedValueOnce(Response.json({}));
-
-            await client.identifiers().interact(group.name, {
-                test: 'interaction',
-            });
+            const stretch = vitest.spyOn(Salter.prototype, 'signer');
+            try {
+                await client.identifiers().interact(group.name, {
+                    test: 'interaction',
+                });
+                expect(stretch).not.toHaveBeenCalled();
+            } finally {
+                stretch.mockRestore();
+            }
 
             const body = client.getLastMockRequest().body;
             const siger = new Siger({ qb64: body.sigs[0] });

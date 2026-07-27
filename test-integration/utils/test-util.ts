@@ -248,7 +248,8 @@ export async function getOrCreateAID(
  */
 export async function getOrCreateClient(
     bran: string | undefined = undefined,
-    externalModule: ExternalModule[] = []
+    externalModule: ExternalModule[] = [],
+    cacheSigners = false
 ): Promise<SignifyClient> {
     const env = resolveEnvironment();
     await ready();
@@ -259,7 +260,8 @@ export async function getOrCreateClient(
         bran,
         Tier.low,
         env.bootUrl,
-        externalModule
+        externalModule,
+        cacheSigners
     );
     try {
         await client.connect();

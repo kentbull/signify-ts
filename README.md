@@ -79,6 +79,29 @@ Typescript source files needs to be transpiled before running scripts or integra
     console.log(actualSignifyClient);
     ```
 
+### Optional derived signer cache
+
+`SignifyClient` can opt in to a session-local cache for accepted salty signer
+sets by passing `true` as its trailing constructor argument:
+
+```javascript
+const cachedClient = new SignifyClient(url, bran, Tier.low, boot_url, [], true);
+```
+
+Each connected client's identifier-manager factory retains at most 16 verified
+salty signer snapshots. A snapshot is installed only after its derived public
+keys exactly match the accepted establishment state. Every lookup still
+returns a fresh manager with fresh signer objects; group managers, remote group
+members, Randy managers, and external managers are not cached.
+
+The cache is cleared when reconnecting begins and before controller rotation
+is attempted. Eviction and clearing drop cache-owned references, but JavaScript
+cannot guarantee physical zeroization of immutable signer seed strings or
+garbage-collected objects. Enable the cache only in a trusted process. The
+application remains responsible for sequencing identifier mutations and
+driving multisig participants to convergence; the cache does not validate a
+KEL or coordinate concurrent operations.
+
 ### Unit testing
 
 To run unit tests
