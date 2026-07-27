@@ -1,6 +1,7 @@
 import libsodium from 'libsodium-wrappers-sumo';
 import { assert, describe, expect, it, vitest } from 'vitest';
 import {
+    Controller,
     Diger,
     GroupIdentifierManager,
     MtrDex,
@@ -11,6 +12,7 @@ import {
     Tier,
     b,
 } from '../../src/index.ts';
+import { createMockIdentifierState } from '../app/test-utils.ts';
 
 describe('IdentifierManager signing', () => {
     it('uses rotated=true to derive group rotation ondex', async () => {
@@ -129,6 +131,96 @@ describe('IdentifierManager signing', () => {
         const siger = new Siger({ qb64: sigs[0] });
         assert.equal(siger.index, 0);
         assert.equal(siger.ondex, undefined);
+    });
+});
+
+describe('IdentifierManagerFactory signer cache', () => {
+    it('reconstructs isolated salty managers from signer snapshots', async () => {
+        await libsodium.ready;
+
+        const bran = '0123456789abcdefghijk';
+        const aid = await createMockIdentifierState('aid1', bran, {
+            count: 2,
+            ncount: 2,
+        });
+        if (!('salty' in aid)) {
+            throw new Error('Expected a salty identifier fixture.');
+        }
+
+        const salter = new Controller(bran, Tier.low).salter;
+        const cold = SaltyIdentifierManager.fromState(salter, aid.salty);
+        const snapshot = Object.freeze({
+            publicKeys: Object.freeze([...aid.state.k]),
+            signerQb64s: Object.freeze(
+                cold.signers.map((signer) => signer.qb64)
+            ),
+        });
+        const stretch = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            const first = SaltyIdentifierManager.fromState(
+                salter,
+                aid.salty,
+                snapshot
+            );
+            const second = SaltyIdentifierManager.fromState(
+                salter,
+                aid.salty,
+                snapshot
+            );
+
+            expect(first).not.toBe(second);
+            expect(first.signers).not.toBe(second.signers);
+            expect(first.signers[0]).not.toBe(second.signers[0]);
+            expect(first.signers[0].raw).not.toBe(second.signers[0].raw);
+            expect(first.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+            expect(second.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+            expect(stretch).not.toHaveBeenCalled();
+
+            const serialized = b('snapshot-isolation');
+            const firstSignatures = await first.sign(serialized);
+            const secondSignatures = await second.sign(serialized);
+            expect(firstSignatures).toEqual(secondSignatures);
+            expect(stretch).not.toHaveBeenCalled();
+
+            const secondRaw = Uint8Array.from(second.signers[0].raw);
+            first.signers[0].raw[0] ^= 0xff;
+            first.signers.pop();
+            const exposedParams = first.params();
+            exposedParams.icodes![0] = MtrDex.Ed25519N;
+            exposedParams.ncodes!.pop();
+
+            expect(first.params().icodes).toEqual(aid.salty.icodes);
+            expect(first.params().ncodes).toEqual(aid.salty.ncodes);
+            expect(second.signers[0].raw).toEqual(secondRaw);
+            expect(second.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+
+            const third = SaltyIdentifierManager.fromState(
+                salter,
+                aid.salty,
+                snapshot
+            );
+            expect(third.signers[0]).not.toBe(second.signers[0]);
+            expect(third.signers[0].raw).not.toBe(second.signers[0].raw);
+            expect(await third.sign(serialized)).toEqual(secondSignatures);
+            expect(stretch).not.toHaveBeenCalled();
+
+            await first.rotate([...aid.salty.ncodes], false);
+            expect(first.signers[0].verfer.transferable).toBe(false);
+            expect(second.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+            expect(second.params().kidx).toBe(aid.salty.kidx);
+            expect(stretch).toHaveBeenCalled();
+        } finally {
+            stretch.mockRestore();
+        }
     });
 });
 

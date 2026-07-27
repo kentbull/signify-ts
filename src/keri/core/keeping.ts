@@ -49,6 +49,28 @@ export interface SaltyManagerParams extends IdentifierManagerParams {
     sxlt: string | undefined;
 }
 
+type SaltySignerSnapshot = Readonly<{
+    publicKeys: readonly string[];
+    signerQb64s: readonly string[];
+}>;
+
+type SaltyManagerInitialization = Readonly<{
+    pidx: number;
+    kidx: number;
+    tier: Tier;
+    transferable: boolean;
+    stem: string | undefined;
+    code: string;
+    count: number;
+    icodes: string[] | undefined;
+    ncode: string;
+    ncount: number;
+    ncodes: string[] | undefined;
+    dcode: string | undefined;
+    bran: string | undefined;
+    sxlt: string | undefined;
+}>;
+
 export interface RandyManagerParams extends IdentifierManagerParams {
     nxts?: string[];
     prxs?: string[];
@@ -246,27 +268,28 @@ export class IdentifierManagerFactory {
 }
 
 export class SaltyIdentifierManager implements IdentifierManager {
-    private aeid: string;
-    private encrypter: Encrypter;
-    private decrypter: Decrypter;
-    private salter: Salter;
-    private pidx: number;
-    private kidx: number;
-    private tier: Tier;
-    private transferable: boolean;
+    private aeid: string | undefined;
+    private encrypter: Encrypter | undefined;
+    private decrypter: Decrypter | undefined;
+    private salter!: Salter;
+    private pidx!: number;
+    private kidx!: number;
+    private tier!: Tier;
+    private transferable!: boolean;
+    private acceptedTransferable!: boolean;
     private stem: string | undefined;
-    private code: string;
-    private count: number;
+    private code!: string;
+    private count!: number;
     private icodes: string[] | undefined;
-    private ncode: string;
-    private ncount: number;
+    private ncode!: string;
+    private ncount!: number;
     private ncodes: string[] | undefined;
     private dcode: string | undefined;
     private sxlt: string | undefined;
     private bran: string | undefined;
-    private creator: SaltyCreator;
-    public algo: Algos = Algos.salty;
-    public signers: Signer[];
+    private creator: SaltyCreator | undefined;
+    public algo!: Algos;
+    public signers!: Signer[];
 
     constructor(
         salter: Salter,
@@ -285,59 +308,178 @@ export class SaltyIdentifierManager implements IdentifierManager {
         bran: string | undefined = undefined,
         sxlt: string | undefined = undefined
     ) {
-        // # Salter is the entered passcode and used for enc/dec of salts for each AID
+        this.initialize(salter, {
+            pidx,
+            kidx,
+            tier,
+            transferable,
+            stem,
+            code,
+            count,
+            icodes,
+            ncode,
+            ncount,
+            ncodes,
+            dcode,
+            bran,
+            sxlt,
+        });
+    }
+
+    /**
+     * Recreate a manager for an accepted salty state.
+     *
+     * Supplying a signer snapshot avoids salt recovery and key derivation.
+     * The returned manager owns fresh signer objects and copied keeper arrays.
+     * @internal
+     */
+    static fromState(
+        salter: Salter,
+        state: SaltyKeyState,
+        snapshot?: SaltySignerSnapshot
+    ): SaltyIdentifierManager {
+        const manager = Object.create(
+            SaltyIdentifierManager.prototype
+        ) as SaltyIdentifierManager;
+        manager.initialize(
+            salter,
+            {
+                pidx: state.pidx,
+                kidx: state.kidx,
+                tier: state.tier,
+                transferable: state.transferable,
+                stem: state.stem,
+                code: state.icodes?.[0] ?? MtrDex.Ed25519_Seed,
+                count: state.icodes?.length ?? 1,
+                icodes: state.icodes,
+                ncode: state.ncodes?.[0] ?? MtrDex.Ed25519_Seed,
+                ncount: state.ncodes?.length ?? 1,
+                ncodes: state.ncodes,
+                dcode: state.dcode,
+                bran: undefined,
+                sxlt: state.sxlt,
+            },
+            snapshot
+        );
+        return manager;
+    }
+
+    private initialize(
+        salter: Salter,
+        state: SaltyManagerInitialization,
+        snapshot?: SaltySignerSnapshot
+    ): void {
         this.salter = salter;
-        const signer = this.salter.signer(code, transferable, undefined, tier);
+        this.pidx = state.pidx;
+        this.kidx = state.kidx;
+        this.tier = state.tier;
+        this.transferable = state.transferable;
+        this.acceptedTransferable = state.transferable;
+        this.stem = state.stem ?? 'signify:aid';
+        this.code = state.code;
+        this.count = state.count;
+        this.icodes =
+            state.icodes === undefined
+                ? new Array<string>(state.count).fill(state.code)
+                : [...state.icodes];
+        this.ncode = state.ncode;
+        this.ncount = state.ncount;
+        this.ncodes =
+            state.ncodes === undefined
+                ? new Array<string>(state.ncount).fill(state.ncode)
+                : [...state.ncodes];
+        this.dcode = state.dcode;
+        this.bran =
+            state.bran === undefined
+                ? undefined
+                : MtrDex.Salt_128 + 'A' + state.bran.slice(0, 21);
+        this.sxlt = state.sxlt;
+        this.aeid = undefined;
+        this.encrypter = undefined;
+        this.decrypter = undefined;
+        this.creator = undefined;
+        this.algo = Algos.salty;
 
+        if (snapshot === undefined) {
+            const creator = this.initializeCreator();
+            this.signers = creator.create(
+                this.icodes,
+                this.ncount,
+                this.ncode,
+                this.transferable,
+                this.pidx,
+                0,
+                this.kidx,
+                false
+            ).signers;
+        } else {
+            this.signers = this.recreateSigners(snapshot);
+        }
+    }
+
+    private recreateSigners(snapshot: SaltySignerSnapshot): Signer[] {
+        if (snapshot.publicKeys.length !== snapshot.signerQb64s.length) {
+            throw new Error(
+                'Signer snapshot key and seed counts do not match.'
+            );
+        }
+
+        return snapshot.signerQb64s.map((signerQb64, index) => {
+            const publicKey = snapshot.publicKeys[index];
+            const verfer = new Verfer({ qb64: publicKey });
+            if (verfer.transferable !== this.transferable) {
+                throw new Error(
+                    `Signer snapshot transferability does not match salty state for key ${index}.`
+                );
+            }
+
+            const signer = new Signer({
+                qb64: signerQb64,
+                transferable: verfer.transferable,
+            });
+            if (signer.verfer.qb64 !== publicKey) {
+                throw new Error(
+                    `Signer snapshot does not reproduce public key ${index}.`
+                );
+            }
+            return signer;
+        });
+    }
+
+    private initializeCreator(): SaltyCreator {
+        if (this.creator !== undefined) {
+            return this.creator;
+        }
+
+        // The controller salter protects the accepted AID salt. Recover it
+        // with the accepted state's transferability before an operation can
+        // mutate its local candidate fields.
+        const signer = this.salter.signer(
+            this.code,
+            this.acceptedTransferable,
+            undefined,
+            this.tier
+        );
         this.aeid = signer.verfer.qb64;
-
         this.encrypter = new Encrypter({}, b(this.aeid));
         this.decrypter = new Decrypter({}, signer.qb64b);
 
-        this.code = code;
-        this.ncode = ncode;
-        this.tier = tier;
-        this.icodes =
-            icodes == undefined ? new Array<string>(count).fill(code) : icodes;
-        this.ncodes =
-            ncodes == undefined
-                ? new Array<string>(ncount).fill(ncode)
-                : ncodes;
-        this.dcode = dcode;
-        this.pidx = pidx;
-        this.kidx = kidx;
-        this.transferable = transferable;
-        this.count = count;
-        this.ncount = ncount;
-        this.stem = stem == undefined ? 'signify:aid' : stem;
-
-        if (bran != undefined) {
-            this.bran = MtrDex.Salt_128 + 'A' + bran!.slice(0, 21);
+        if (this.bran !== undefined) {
             this.creator = new SaltyCreator(this.bran, this.tier, this.stem);
             this.sxlt = this.encrypter.encrypt(b(this.creator.salt)).qb64;
-        } else if (sxlt == undefined) {
+        } else if (this.sxlt === undefined) {
             this.creator = new SaltyCreator(undefined, this.tier, this.stem);
             this.sxlt = this.encrypter.encrypt(b(this.creator.salt)).qb64;
         } else {
-            this.sxlt = sxlt;
-            const ciph = new Cipher({ qb64: this.sxlt });
+            const cipher = new Cipher({ qb64: this.sxlt });
             this.creator = new SaltyCreator(
-                this.decrypter.decrypt(null, ciph).qb64,
-                tier,
+                this.decrypter.decrypt(null, cipher).qb64,
+                this.tier,
                 this.stem
             );
         }
 
-        this.signers = this.creator.create(
-            this.icodes,
-            this.ncount,
-            this.ncode,
-            this.transferable,
-            this.pidx,
-            0,
-            this.kidx,
-            false
-        ).signers;
+        return this.creator;
     }
 
     params(): SaltyManagerParams {
@@ -347,18 +489,19 @@ export class SaltyIdentifierManager implements IdentifierManager {
             kidx: this.kidx,
             stem: this.stem,
             tier: this.tier,
-            icodes: this.icodes,
-            ncodes: this.ncodes,
+            icodes: this.icodes === undefined ? undefined : [...this.icodes],
+            ncodes: this.ncodes === undefined ? undefined : [...this.ncodes],
             dcode: this.dcode,
             transferable: this.transferable,
         };
     }
 
     async incept(transferable: boolean): Promise<IdentifierManagerResult> {
+        const creator = this.initializeCreator();
         this.transferable = transferable;
         this.kidx = 0;
 
-        const signers = this.creator.create(
+        const signers = creator.create(
             this.icodes,
             this.count,
             this.code,
@@ -368,9 +511,10 @@ export class SaltyIdentifierManager implements IdentifierManager {
             this.kidx,
             false
         );
+        this.signers = signers.signers;
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
-        const nsigners = this.creator.create(
+        const nsigners = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,
@@ -392,9 +536,10 @@ export class SaltyIdentifierManager implements IdentifierManager {
         ncodes: string[],
         transferable: boolean
     ): Promise<[string[], string[]]> {
+        const creator = this.initializeCreator();
         this.ncodes = ncodes;
         this.transferable = transferable;
-        const signers = this.creator.create(
+        const signers = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,
@@ -404,10 +549,11 @@ export class SaltyIdentifierManager implements IdentifierManager {
             this.kidx + this.icodes!.length,
             false
         );
+        this.signers = signers.signers;
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
         this.kidx = this.kidx! + this.icodes!.length;
-        const nsigners = this.creator.create(
+        const nsigners = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,
@@ -432,25 +578,14 @@ export class SaltyIdentifierManager implements IdentifierManager {
         ondices: Ondex[] | undefined = undefined,
         _rotated?: boolean
     ): Promise<SignResult> {
-        const signers = this.creator.create(
-            this.icodes,
-            this.ncount,
-            this.ncode,
-            this.transferable,
-            this.pidx,
-            0,
-            this.kidx,
-            false
-        );
-
         if (indexed) {
             const sigers = [];
             let i = 0;
-            for (const [j, signer] of signers.signers.entries()) {
+            for (const [j, signer] of this.signers.entries()) {
                 if (
                     indices &&
                     indices.length > 0 &&
-                    indices.length === signers.signers.length
+                    indices.length === this.signers.length
                 ) {
                     i = indices[j]; // default indexing behavior of pulling index order from signer order
                     if (!Number.isInteger(i) || i < 0) {
@@ -482,7 +617,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
             return sigers.map((siger) => siger.qb64);
         } else {
             const cigars = [];
-            for (const [, signer] of signers.signers.entries()) {
+            for (const signer of this.signers) {
                 cigars.push(signer.sign(ser));
             }
             return cigars.map((cigar) => cigar.qb64);
