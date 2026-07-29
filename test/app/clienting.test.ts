@@ -353,6 +353,32 @@ describe('SignifyClient', () => {
         );
     });
 
+    test('Sends the request body verbatim, without escaping separators', async () => {
+        const prepareSpy = vi.spyOn(
+            SignedHeaderAuthenticator.prototype,
+            'prepare'
+        );
+
+        await libsodium.ready;
+        const client = new SignifyClient(
+            url,
+            '0123456789abcdefghijk',
+            Tier.low,
+            boot_url
+        );
+        await client.connect();
+
+        const alias = 'a\u2028b\u2029c\u0085d';
+        await client.fetch('/contacts', 'POST', { alias });
+
+        const request = prepareSpy.mock.calls
+            .map((call) => call[0])
+            .find(
+                (req) => req.url.endsWith('/contacts') && req.method === 'POST'
+            )!;
+        assert.equal(await request.text(), JSON.stringify({ alias }));
+    });
+
     test('ESSR protected fetch', async () => {
         await libsodium.ready;
         const bran = '0123456789abcdefghijk';
