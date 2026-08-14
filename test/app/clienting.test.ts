@@ -65,7 +65,6 @@ describe('SignifyClient', () => {
         );
         assert.deepEqual(client.controller.serder.sad.s, '0');
 
-        const bootController = client.controller;
         const res = await client.boot();
         assert.equal(fetchMock.mock.calls[0]![0]!, boot_url + '/boot');
         assert.equal(
@@ -74,8 +73,7 @@ describe('SignifyClient', () => {
         );
         assert.equal(res.status, 202);
 
-        await client.connectAfterBoot();
-        assert.equal(client.controller, bootController);
+        await client.connect();
 
         // validate agent
         assert(
@@ -137,7 +135,7 @@ describe('SignifyClient', () => {
         const firstCall = fetchMock.mock.calls.length;
 
         await client.boot({ signal: controller.signal });
-        await client.connectAfterBoot({ signal: controller.signal });
+        await client.connect({ signal: controller.signal });
 
         const setupCalls = fetchMock.mock.calls.slice(firstCall);
         assert.equal(setupCalls.length, 3);

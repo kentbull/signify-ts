@@ -27,12 +27,12 @@ test('boot and connect honor cancellation signals', async () => {
 
     const connectCancellation = new Error('cancel connect');
     await expect(
-        client.connectAfterBoot({
+        client.connect({
             signal: AbortSignal.abort(connectCancellation),
         })
     ).rejects.toBe(connectCancellation);
 
-    await client.connectAfterBoot({
+    await client.connect({
         signal: AbortSignal.timeout(5_000),
     });
     assert(client.agent);

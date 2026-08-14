@@ -170,42 +170,49 @@ export class SignifyClient {
     }
 
     /**
-     * Connect to an existing KERIA Agent and restore its in-memory Controller.
+     * Connect to an existing KERIA Agent and restore its in-memory Controller,
+     * load agent state, and initialize authenticated client services.
+     *
      * @async
      * @param {ConnectionOptions} [options] Cancellation options
      */
     async connect(options: ConnectionOptions = {}) {
-        await this.connectToAgent(false, options);
-    }
+        const state = await this.state(options);
+        this.pidx = state.pidx;
+        // Restore the controller from KERIA's authoritative persisted state.
+        this.controller = new Controller(
+            this.bran,
+            this.tier,
+            0,
+            state.controller
+        );
+        this.controller.ridx = state.ridx !== undefined ? state.ridx : 0;
+        // Create agent representing the AID of KERIA cloud agent
+        this.agent = new Agent(state.agent);
+        if (this.agent.anchor !== this.controller.pre) {
+            throw Error(
+                'commitment to controller AID missing in agent inception event'
+            );
+        }
 
-    /**
-     * Connect immediately after this client successfully booted its controller.
-     *
-     * The boot request used the controller already held by this instance, so
-     * exact state validation lets us avoid deriving identical keys again.
-     *
-     * @param {ConnectionOptions} [options] Cancellation options
-     */
-    async connectAfterBoot(options: ConnectionOptions = {}) {
-        await this.connectToAgent(true, options);
-    }
+        const controllerSequence = state.controller?.state?.s;
+        if (typeof controllerSequence !== 'string') {
+            throw new Error(
+                'KERIA controller state is missing a string sequence number'
+            );
+        }
 
-    /** Check whether KERIA and this client hold the same establishment state. */
-    private _controllerMatchesKeriaEstablishment(
-        state: State,
-        ctrl: Controller
-    ): boolean {
-        const stateEstEvt = state.controller?.ee;
-        const ctrlEstEvt = ctrl.serder;
-        const rotationIdxMatches = state.ridx === ctrl.ridx;
-        const estEvtPreMatches = stateEstEvt?.i === ctrl.pre;
-        const estEvtSeqNoMatches = stateEstEvt?.s === ctrlEstEvt.sad.s;
-        const estEvtDigMatches = stateEstEvt?.d === ctrlEstEvt.sad.d;
-        return (
-            rotationIdxMatches &&
-            estEvtPreMatches &&
-            estEvtSeqNoMatches &&
-            estEvtDigMatches
+        if (new CesrNumber({}, controllerSequence).num === 0) {
+            await this.approveDelegation(options);
+        }
+
+        this.manager = new IdentifierManagerFactory(
+            this.controller.salter,
+            this.exteralModules
+        );
+        this.authn = new Authenticater(
+            this.controller.signer,
+            this.agent.verfer!
         );
     }
 
@@ -255,63 +262,6 @@ export class SignifyClient {
                 'controller delegation approval seal does not match KERIA agent'
             );
         }
-    }
-
-    /** Load agent state and initialize authenticated client services. */
-    private async connectToAgent(
-        reuseController: boolean,
-        options: ConnectionOptions
-    ) {
-        const state = await this.state(options);
-        this.pidx = state.pidx;
-        if (reuseController) {
-            if (
-                !this._controllerMatchesKeriaEstablishment(
-                    state,
-                    this.controller
-                )
-            ) {
-                throw new Error(
-                    'booted controller does not match KERIA controller state'
-                );
-            }
-        } else {
-            // Reconnecting clients must derive the keys for persisted state.
-            this.controller = new Controller(
-                this.bran,
-                this.tier,
-                0,
-                state.controller
-            );
-        }
-        this.controller.ridx = state.ridx !== undefined ? state.ridx : 0;
-        // Create agent representing the AID of KERIA cloud agent
-        this.agent = new Agent(state.agent);
-        if (this.agent.anchor !== this.controller.pre) {
-            throw Error(
-                'commitment to controller AID missing in agent inception event'
-            );
-        }
-
-        const controllerSequence = state.controller?.state?.s;
-        if (typeof controllerSequence !== 'string') {
-            throw new Error(
-                'KERIA controller state is missing a string sequence number'
-            );
-        }
-
-        if (new CesrNumber({}, controllerSequence).num === 0) {
-            await this.approveDelegation(options);
-        }
-
-        this.manager = new IdentifierManagerFactory(
-            this.controller.salter,
-            this.exteralModules
-        );
-        this.authn = new Authenticater(
-            this.controller.signer,
-            this.agent.verfer!
-        );
     }
 
     /**
