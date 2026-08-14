@@ -1,6 +1,5 @@
 import { assert, describe, it, test, expect, vitest } from 'vitest';
 import { SignifyClient } from '../../src/keri/app/clienting.ts';
-import { Controller } from '../../src/keri/app/controller.ts';
 import { Identifier } from '../../src/keri/app/aiding.ts';
 import {
     Operations,
@@ -157,39 +156,6 @@ describe('SignifyClient', () => {
 
         expect(approveDelegation).not.toHaveBeenCalled();
         assert(client.authn !== null);
-    });
-
-    it('rejects a locally generated delegation event with the wrong Agent seal', async () => {
-        await libsodium.ready;
-        const originalApproval = Controller.prototype.approveDelegation;
-        const approval = vitest.spyOn(
-            Controller.prototype,
-            'approveDelegation'
-        );
-        approval.mockImplementation(function (this: Controller, agent) {
-            const result = originalApproval.call(this, agent);
-            result.event.sad.a[0].d = 'EWrongAgentDelegationSeal';
-            return result;
-        });
-
-        const client = new SignifyClient(url, bran, Tier.low, boot_url);
-        const firstCall = fetchMock.mock.calls.length;
-        try {
-            await expect(client.connect()).rejects.toThrow(
-                'controller delegation approval seal does not match KERIA agent'
-            );
-        } finally {
-            approval.mockRestore();
-        }
-
-        assert.equal(
-            fetchMock.mock.calls
-                .slice(firstCall)
-                .some(([input]) => input.toString().includes('?type=ixn')),
-            false
-        );
-        assert.equal(client.authn, null);
-        assert.equal(client.manager, null);
     });
 
     it('rejects a non-string authoritative controller sequence', async () => {

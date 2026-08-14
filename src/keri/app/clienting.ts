@@ -1,12 +1,9 @@
 import { components } from '../../types/keria-api-schema.ts';
 import { Authenticater } from '../core/authing.ts';
-import { Ilks } from '../core/core.ts';
 import { HEADER_SIG_TIME } from '../core/httping.ts';
 import { ExternalModule, IdentifierManagerFactory } from '../core/keeping.ts';
 import { CesrNumber } from '../core/number.ts';
 import { Tier } from '../core/salter.ts';
-import { Seqner } from '../core/seqner.ts';
-import { Serder } from '../core/serder.ts';
 
 import { Identifier } from './aiding.ts';
 import { Contacts, Challenges } from './contacting.ts';
@@ -216,54 +213,6 @@ export class SignifyClient {
         );
     }
 
-    /** Compute the Agent delegation seal the controller must anchor. */
-    private _agentDelegationSeal() {
-        if (
-            this.agent === null ||
-            this.agent.sn === undefined ||
-            this.agent.said === undefined ||
-            this.agent.said.length === 0
-        ) {
-            throw new Error(
-                'KERIA agent state is incomplete for delegation verification'
-            );
-        }
-
-        return {
-            i: this.agent.pre,
-            s: new Seqner({ sn: this.agent.sn }).snh,
-            d: this.agent.said,
-        };
-    }
-
-    /** Verify the local interaction event anchors this exact Agent. */
-    private _verifyAgentDelegationSeal(event: Serder) {
-        const expected = this._agentDelegationSeal();
-        if (event.sad.t !== Ilks.ixn) {
-            throw new Error(
-                'controller delegation approval is not an interaction event'
-            );
-        }
-
-        const seals = event.sad.a;
-        if (!Array.isArray(seals) || seals.length !== 1) {
-            throw new Error(
-                'controller delegation approval must contain exactly one seal'
-            );
-        }
-
-        const seal = seals[0];
-        if (
-            seal.i !== expected.i ||
-            seal.s !== expected.s ||
-            seal.d !== expected.d
-        ) {
-            throw new Error(
-                'controller delegation approval seal does not match KERIA agent'
-            );
-        }
-    }
-
     /**
      * Fetch a resource from the KERIA agent
      * @async
@@ -393,7 +342,6 @@ export class SignifyClient {
     ): Promise<Response> {
         options.signal?.throwIfAborted();
         const approval = this.controller.approveDelegation(this.agent!);
-        this._verifyAgentDelegationSeal(approval.event);
 
         const data = {
             ixn: approval.event.sad,
