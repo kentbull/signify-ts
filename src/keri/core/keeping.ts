@@ -368,6 +368,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
             this.kidx,
             false
         );
+        this.signers = signers.signers;
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
         const nsigners = this.creator.create(
@@ -404,6 +405,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
             this.kidx + this.icodes!.length,
             false
         );
+        this.signers = signers.signers;
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
         this.kidx = this.kidx! + this.icodes!.length;
@@ -432,25 +434,14 @@ export class SaltyIdentifierManager implements IdentifierManager {
         ondices: Ondex[] | undefined = undefined,
         _rotated?: boolean
     ): Promise<SignResult> {
-        const signers = this.creator.create(
-            this.icodes,
-            this.ncount,
-            this.ncode,
-            this.transferable,
-            this.pidx,
-            0,
-            this.kidx,
-            false
-        );
-
         if (indexed) {
             const sigers = [];
             let i = 0;
-            for (const [j, signer] of signers.signers.entries()) {
+            for (const [j, signer] of this.signers.entries()) {
                 if (
                     indices &&
                     indices.length > 0 &&
-                    indices.length === signers.signers.length
+                    indices.length === this.signers.length
                 ) {
                     i = indices[j]; // default indexing behavior of pulling index order from signer order
                     if (!Number.isInteger(i) || i < 0) {
@@ -482,7 +473,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
             return sigers.map((siger) => siger.qb64);
         } else {
             const cigars = [];
-            for (const [, signer] of signers.signers.entries()) {
+            for (const [, signer] of this.signers.entries()) {
                 cigars.push(signer.sign(ser));
             }
             return cigars.map((cigar) => cigar.qb64);

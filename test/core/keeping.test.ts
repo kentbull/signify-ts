@@ -6,6 +6,7 @@ import {
     MtrDex,
     RandyIdentifierManager,
     Salter,
+    SaltyCreator,
     SaltyIdentifierManager,
     Siger,
     Tier,
@@ -13,6 +14,70 @@ import {
 } from '../../src/index.ts';
 
 describe('IdentifierManager signing', () => {
+    it('reuses retained salty signers across repeated signing', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const manager = new SaltyIdentifierManager(
+            salter,
+            0,
+            0,
+            Tier.low,
+            true
+        );
+        await manager.incept(true);
+        const create = vitest.spyOn(SaltyCreator.prototype, 'create');
+
+        try {
+            const serialized = b('retained-salty-signers');
+            const first = await manager.sign(serialized);
+            const second = await manager.sign(serialized);
+
+            expect(second).toEqual(first);
+            expect(create).not.toHaveBeenCalled();
+        } finally {
+            create.mockRestore();
+        }
+    });
+
+    it('refreshes retained salty signers for inception and rotation', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const manager = new SaltyIdentifierManager(
+            salter,
+            0,
+            0,
+            Tier.low,
+            true
+        );
+        const constructedSigner = manager.signers[0];
+
+        const [inceptionKeys] = await manager.incept(true);
+        expect(manager.signers[0]).not.toBe(constructedSigner);
+        expect(manager.signers.map((signer) => signer.verfer.qb64)).toEqual(
+            inceptionKeys
+        );
+
+        const inceptionSigner = manager.signers[0];
+        const [rotationKeys] = await manager.rotate(
+            [MtrDex.Ed25519_Seed],
+            true
+        );
+        expect(manager.signers[0]).not.toBe(inceptionSigner);
+        expect(manager.signers.map((signer) => signer.verfer.qb64)).toEqual(
+            rotationKeys
+        );
+
+        const create = vitest.spyOn(SaltyCreator.prototype, 'create');
+        try {
+            await manager.sign(b('rotated-retained-salty-signers'));
+            expect(create).not.toHaveBeenCalled();
+        } finally {
+            create.mockRestore();
+        }
+    });
+
     it('uses rotated=true to derive group rotation ondex', async () => {
         await libsodium.ready;
 
