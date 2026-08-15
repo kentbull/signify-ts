@@ -18,6 +18,7 @@ import {
 import { designature, Signage, signature } from '../../src/keri/end/ending.ts';
 import { Diger } from '../../src/keri/core/diger.ts';
 import { Cigar } from '../../src/keri/core/cigar.ts';
+import { Siger } from '../../src/keri/core/siger.ts';
 import { MtrDex } from '../../src/keri/core/matter.ts';
 
 // prettier-ignore
@@ -304,6 +305,7 @@ describe('ESSR Authenticator', () => {
         assert.equal(
             plaintextGet,
             `GET http://127.0.0.1:3901/oobis HTTP/1.1\r
+content-length: 0\r
 \r
 `
         );
@@ -327,6 +329,7 @@ describe('ESSR Authenticator', () => {
             plaintextPost,
             `POST http://127.0.0.1:3901/oobis HTTP/1.1\r
 content-type: text/plain;charset=UTF-8\r
+content-length: 7\r
 \r
 {"a":1}`
         );
@@ -466,7 +469,7 @@ content-type: text/plain;charset=UTF-8\r
                 'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
             )
         ).rejects.toThrow(
-            'Invalid ESSR payload, missing or incorrect encrypted sender'
+            'Failed to deserialize ESSR response - missing CRLFCRLF separator'
         );
 
         headers.set(HEADER_SIG_TIME, '2025-01-17T12:00:18.260000+00:00');
@@ -482,7 +485,7 @@ content-type: text/plain;charset=UTF-8\r
                 'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
             )
         ).rejects.toThrow(
-            'Invalid ESSR payload, missing or incorrect encrypted sender'
+            'Failed to deserialize ESSR response - missing CRLFCRLF separator'
         );
 
         headers.set(HEADER_SIG_TIME, '2025-01-17T12:04:16.254000+00:00');
@@ -557,6 +560,74 @@ describe('EssrAuthenticator decrypt failure', () => {
     });
 });
 
+describe('EssrAuthenticator binary response', () => {
+    test('Verifies, decrypts, and preserves exact response bytes', async () => {
+        await libsodium.ready;
+        const controllerSigner = new Salter({
+            raw: b('0123456789abcdef'),
+        }).signer();
+        const agentSigner = new Salter({
+            qb64: '0AAwMTIzNDU2Nzg5YWJjZGVm',
+        }).signer(
+            'A',
+            true,
+            'agentagent-ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose00',
+            Tier.low
+        );
+        const authn = new EssrAuthenticator(
+            controllerSigner,
+            agentSigner.verfer
+        );
+        const sender = 'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei';
+        const receiver = 'ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose';
+        const body = new Uint8Array([0xff, 0xfe, 0, 13, 10, 0x85]);
+        const head = b(
+            'HTTP/1.1 200 OK\r\n' +
+                'content-type: application/octet-stream\r\n' +
+                'content-length: 6\r\n' +
+                `signify-resource: ${sender}\r\n` +
+                '\r\n'
+        );
+        const inner = new Uint8Array(head.byteLength + body.byteLength);
+        inner.set(head);
+        inner.set(body, head.byteLength);
+
+        const controllerBoxPub = libsodium.crypto_sign_ed25519_pk_to_curve25519(
+            controllerSigner.verfer.raw
+        );
+        const ciphertext = libsodium.crypto_box_seal(inner, controllerBoxPub);
+        const dt = '2025-01-17T12:04:16.254000+00:00';
+        const payload = {
+            src: sender,
+            dest: receiver,
+            d: new Diger({ code: MtrDex.Blake3_256 }, ciphertext).qb64,
+            dt,
+        };
+        const markers = new Map<string, Cigar | Siger>();
+        markers.set('signify', agentSigner.sign(b(JSON.stringify(payload))));
+        const headers = new Headers([
+            [HEADER_SIG_SENDER, sender],
+            [HEADER_SIG_DESTINATION, receiver],
+            [HEADER_SIG_TIME, dt],
+        ]);
+        signature([new Signage(markers, false)]).forEach((value, key) =>
+            headers.set(key, value)
+        );
+
+        const response = await authn.verify(
+            new Request('https://example.com/binary'),
+            new Response(ciphertext as Uint8Array<ArrayBuffer>, {
+                status: 200,
+                headers,
+            }),
+            receiver,
+            sender
+        );
+
+        assert.deepEqual(new Uint8Array(await response.arrayBuffer()), body);
+    });
+});
+
 describe('EssrAuthenticator.serializeRequest', () => {
     test('Can serialise a GET request', async () => {
         const request = new Request('http://127.0.0.1:3901/oobis', {
@@ -567,9 +638,10 @@ describe('EssrAuthenticator.serializeRequest', () => {
             },
         });
         assert.equal(
-            await EssrAuthenticator.serializeRequest(request),
+            d(await EssrAuthenticator.serializeRequest(request)),
             `GET http://127.0.0.1:3901/oobis HTTP/1.1\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
+content-length: 0\r
 \r
 `
         );
@@ -587,10 +659,11 @@ signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
             },
         });
         assert.equal(
-            await EssrAuthenticator.serializeRequest(request),
+            d(await EssrAuthenticator.serializeRequest(request)),
             `POST http://127.0.0.1:3901/oobis HTTP/1.1\r
 content-type: text/plain;charset=UTF-8\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
+content-length: 7\r
 \r
 {"a":1}`
         );
@@ -606,63 +679,102 @@ signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
             },
         });
         assert.equal(
-            await EssrAuthenticator.serializeRequest(request),
+            d(await EssrAuthenticator.serializeRequest(request)),
             `POST http://127.0.0.1:3901/oobis HTTP/1.1\r
 content-type: text/plain;charset=UTF-8\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
+content-length: 2\r
 \r
 Hi`
         );
+    });
+
+    test('Preserves an arbitrary binary body', async () => {
+        const body = new Uint8Array([0xff, 0xfe, 0, 13, 10, 0x85]);
+        const request = new Request('https://[2001:db8::1]/binary', {
+            method: 'POST',
+            body,
+        });
+
+        const serialized = await EssrAuthenticator.serializeRequest(request);
+        assert.match(
+            d(serialized.slice(0, -body.byteLength)),
+            /content-length: 6/
+        );
+        assert.deepEqual(serialized.slice(-body.byteLength), body);
+    });
+
+    test('Rejects unsupported or incoherent framing', async () => {
+        const wrongLength = new Request('https://example.com/binary', {
+            method: 'POST',
+            body: new Uint8Array([1, 2]),
+            headers: { 'Content-Length': '999' },
+        });
+        await expect(
+            EssrAuthenticator.serializeRequest(wrongLength)
+        ).rejects.toThrow('Content-Length does not match the body');
+
+        const transferEncoded = new Request('https://example.com/binary', {
+            method: 'POST',
+            body: new Uint8Array([1, 2]),
+            headers: { 'Transfer-Encoding': 'chunked' },
+        });
+        await expect(
+            EssrAuthenticator.serializeRequest(transferEncoded)
+        ).rejects.toThrow('Transfer-Encoding is unsupported');
     });
 });
 
 describe('EssrAuthenticator.deserializeResponse', () => {
     test('Preserves a body containing raw CRLF', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 200 OK\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 200 OK\r
 content-type: application/json\r
 \r
-{"a":"x\r\ny"}`);
+{"a":"x\r\ny"}`)
+        );
         assert.equal(await response.text(), '{"a":"x\r\ny"}');
     });
 
     test('Preserves a body containing a blank line', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 200 OK\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 200 OK\r
 content-type: text/plain\r
 \r
 one\r
 \r
-two`);
+two`)
+        );
         assert.equal(await response.text(), 'one\r\n\r\ntwo');
     });
 
     test('Preserves a header value containing a colon-space', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 200 OK\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 200 OK\r
 location: http://example.com: 8080\r
 \r
-`);
+`)
+        );
         assert.equal(
             response.headers.get('location'),
             'http://example.com: 8080'
         );
     });
 
-    test('Parses a status-line-only payload with no separator', () => {
-        const response = EssrAuthenticator.deserializeResponse(
-            'HTTP/1.1 204 No Content\r\n'
-        );
-        assert.equal(response.status, 204);
-        assert.equal(response.statusText, 'No Content');
-        assert.equal(response.body, null);
+    test('Rejects a status-line-only payload with no separator', () => {
+        expect(() =>
+            EssrAuthenticator.deserializeResponse(
+                b('HTTP/1.1 204 No Content\r\n')
+            )
+        ).toThrow('missing CRLFCRLF separator');
     });
 
     test('Can deserialise a GET response with no headers', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 204 No Content\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 204 No Content\r
 \r
-`);
+`)
+        );
         assert.equal(response.status, 204);
         assert.equal(response.statusText, 'No Content');
         assert.equal(response.headers.has('content-type'), false);
@@ -671,12 +783,13 @@ location: http://example.com: 8080\r
     });
 
     test('Can deserialise a GET response with headers', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 204 No Content\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 204 No Content\r
 content-type: text/plain;charset=UTF-8\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
 \r
-`);
+`)
+        );
         assert.equal(response.status, 204);
         assert.equal(response.statusText, 'No Content');
         assert.equal(
@@ -690,13 +803,25 @@ signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
         assert.equal(response.body, null);
     });
 
+    test('Allows metadata Content-Length on a bodyless HEAD response', () => {
+        const response = EssrAuthenticator.deserializeResponse(
+            b('HTTP/1.1 200 OK\r\ncontent-length: 42\r\n\r\n'),
+            'HEAD'
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('content-length'), '42');
+        assert.equal(response.body, null);
+    });
+
     test('Can deserialise a POST response with a JSON body', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 200 OK\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 200 OK\r
 content-type: text/plain;charset=UTF-8\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
 \r
-{"a":1}`);
+{"a":1}`)
+        );
         assert.equal(response.status, 200);
         assert.equal(response.statusText, 'OK');
         assert.equal(
@@ -711,12 +836,13 @@ signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
     });
 
     test('Can deserialise a POST response with a text body', async () => {
-        const response =
-            EssrAuthenticator.deserializeResponse(`HTTP/1.1 200 OK\r
+        const response = EssrAuthenticator.deserializeResponse(
+            b(`HTTP/1.1 200 OK\r
 content-type: text/plain;charset=UTF-8\r
 signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r
 \r
-Hi`);
+Hi`)
+        );
         assert.equal(response.status, 200);
         assert.equal(response.statusText, 'OK');
         assert.equal(
@@ -728,5 +854,52 @@ Hi`);
             'ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose'
         );
         assert.deepEqual(await response.text(), 'Hi');
+    });
+
+    test('Preserves an arbitrary binary response body', async () => {
+        const body = new Uint8Array([0xff, 0xfe, 0, 13, 10, 0x85]);
+        const head = b(
+            'HTTP/1.1 200 OK\r\n' +
+                'content-type: application/octet-stream\r\n' +
+                'content-length: 6\r\n' +
+                'signify-resource: ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose\r\n' +
+                '\r\n'
+        );
+        const serialized = new Uint8Array(head.byteLength + body.byteLength);
+        serialized.set(head);
+        serialized.set(body, head.byteLength);
+
+        const response = EssrAuthenticator.deserializeResponse(serialized);
+        assert.equal(response.status, 200);
+        assert.equal(
+            response.headers.get('content-type'),
+            'application/octet-stream'
+        );
+        assert.deepEqual(new Uint8Array(await response.arrayBuffer()), body);
+    });
+
+    test.each([
+        [b('HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nabc'), undefined],
+        [b('HTTP/1.1 204 No Content\r\n\r\nbody'), undefined],
+        [b('HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n'), undefined],
+        [
+            b('HTTP/1.1 205 Reset Content\r\ncontent-length: 1\r\n\r\n'),
+            undefined,
+        ],
+        [b('HTTP/1.1 304 Not Modified\r\n\r\nbody'), undefined],
+        [b('HTTP/1.1 200 OK\r\n\r\nbody'), 'HEAD'],
+        [b('HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n'), undefined],
+        [b('HTTP/2 200 OK\r\n\r\n'), undefined],
+        [
+            new Uint8Array([
+                72, 84, 84, 80, 47, 49, 46, 49, 32, 50, 48, 48, 32, 79, 75, 13,
+                10, 120, 58, 32, 255, 13, 10, 13, 10,
+            ]),
+            undefined,
+        ],
+    ])('Rejects malformed or incoherent responses', (serialized, method) => {
+        expect(() =>
+            EssrAuthenticator.deserializeResponse(serialized, method)
+        ).toThrow();
     });
 });

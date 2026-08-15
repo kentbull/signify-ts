@@ -223,31 +223,47 @@ export class SignifyClient {
         data?: unknown,
         extraHeaders?: Headers
     ): Promise<Response> {
+        const headers = new Headers(extraHeaders);
+        const body = method == 'GET' ? null : jsonBody(data);
+        if (body) {
+            headers.set('Content-Type', 'application/json');
+        }
+
+        return await this.fetchRequest(path, {
+            method,
+            body,
+            headers,
+        });
+    }
+
+    /**
+     * Fetch a KERIA resource with an exact, finite Fetch API request body.
+     *
+     * Unlike {@link fetch}, this method does not JSON-encode the body. ESSR
+     * buffers and seals the complete request and response, so live or infinite
+     * streams are not supported.
+     *
+     * @param {string} path Path to the KERIA resource
+     * @param {RequestInit} [init] Standard Fetch API request options
+     * @returns {Promise<Response>} A promise to the authenticated response
+     */
+    async fetchRequest(
+        path: string,
+        init: RequestInit = {}
+    ): Promise<Response> {
         if (!this.authn) {
             throw new Error('Client needs to call connect first');
         }
 
-        const headers = new Headers();
+        const headers = new Headers(init.headers);
         headers.set(HEADER_SIG_SENDER, this.controller.pre);
         headers.set(
             HEADER_SIG_TIME,
             new Date().toISOString().replace('Z', '000+00:00')
         );
 
-        if (extraHeaders) {
-            extraHeaders.forEach((value, key) => {
-                headers.append(key, value);
-            });
-        }
-
-        const body = method == 'GET' ? null : jsonBody(data);
-        if (body) {
-            headers.set('Content-Type', 'application/json');
-        }
-
         const baseRequest = new Request(this.url + path, {
-            method,
-            body,
+            ...init,
             headers,
         });
         const request = await this.authn.prepare(
@@ -266,7 +282,7 @@ export class SignifyClient {
         if (!res.ok) {
             const error = await res.text();
             throw new Error(
-                `HTTP ${method} ${path} - ${res.status} ${res.statusText} - ${error}`
+                `HTTP ${baseRequest.method} ${path} - ${res.status} ${res.statusText} - ${error}`
             );
         }
 

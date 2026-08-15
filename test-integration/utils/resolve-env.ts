@@ -18,8 +18,8 @@ export function resolveEnvironment(
 ): TestEnvironment {
     const preset = input ?? process.env.TEST_ENVIRONMENT ?? 'docker';
 
-    const url = 'http://127.0.0.1:3901';
-    const bootUrl = 'http://127.0.0.1:3903';
+    const url = process.env.KERIA_URL ?? 'http://127.0.0.1:3901';
+    const bootUrl = process.env.KERIA_BOOT_URL ?? 'http://127.0.0.1:3903';
 
     switch (preset) {
         case 'docker':

@@ -16,7 +16,18 @@ import { Cigar } from './cigar.ts';
 import { Siger } from './siger.ts';
 import { Diger } from './diger.ts';
 import { MtrDex } from './matter.ts';
-import { b, d } from './core.ts';
+import { b } from './core.ts';
+
+const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const RESPONSE_STATUS_LINE = /^HTTP\/1\.[01] ([0-9]{3})(?: (.*))?$/;
+const HEADER_SEPARATOR = new Uint8Array([13, 10, 13, 10]);
+
+function contentLengthEquals(value: string, length: number): boolean {
+    return (
+        /^\d+$/.test(value) &&
+        value.replace(/^0+(?=\d)/, '') === length.toString()
+    );
+}
 
 export abstract class Authenticator {
     protected verfer: Verfer;
@@ -224,9 +235,9 @@ export class EssrAuthenticator extends Authenticator {
         headers.set(HEADER_SIG_TIME, dt);
         headers.set('Content-Type', 'application/octet-stream');
 
-        const requestStr = await EssrAuthenticator.serializeRequest(request);
+        const requestBytes = await EssrAuthenticator.serializeRequest(request);
         const raw = libsodium.crypto_box_seal(
-            requestStr,
+            requestBytes,
             this.vx25519Pub
         ) as Uint8Array<ArrayBuffer>;
 
@@ -267,60 +278,61 @@ export class EssrAuthenticator extends Authenticator {
             );
         }
 
-        return await this.unwrap(response, remote, local);
+        return await this.unwrap(response, remote, local, request.method);
     }
 
-    static async serializeRequest(request: Request) {
-        let headers = '';
+    /**
+     * Serialize the finite request as KERIA's ESSR-specific HTTP envelope.
+     *
+     * The HTTP head is ASCII and the body is appended as exact bytes. This is
+     * not a general HTTP serializer and deliberately rejects transfer coding.
+     */
+    static async serializeRequest(request: Request): Promise<Uint8Array> {
+        const body =
+            request.body === null
+                ? new Uint8Array()
+                : new Uint8Array(await request.arrayBuffer());
+        const headers: string[] = [];
+        let contentLength: string | null = null;
+
         request.headers.forEach((value, name) => {
-            headers += `${name}: ${value}\r\n`;
+            const lowerName = name.toLowerCase();
+            if (lowerName === 'transfer-encoding') {
+                throw new Error(
+                    'Failed to serialize ESSR request - Transfer-Encoding is unsupported'
+                );
+            }
+            if (lowerName === 'content-length') {
+                contentLength = value;
+                return;
+            }
+            headers.push(`${name}: ${value}`);
         });
 
-        let body = '';
-        if (request.method !== 'GET' && request.body) {
-            const bytes = await this.streamToBytes(request.body);
-            try {
-                body = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-            } catch (e) {
+        if (contentLength !== null) {
+            if (!contentLengthEquals(contentLength, body.byteLength)) {
                 throw new Error(
-                    'Failed to serialize ESSR request - body is not valid UTF-8',
-                    { cause: e }
+                    'Failed to serialize ESSR request - Content-Length does not match the body'
                 );
             }
         }
+        headers.push(`content-length: ${body.byteLength}`);
 
-        return `${request.method} ${request.url} HTTP/1.1\r\n${headers}\r\n${body}`;
-    }
-
-    static async streamToBytes(stream: ReadableStream): Promise<Uint8Array> {
-        const reader = stream.getReader();
-        const chunks = [];
-        let done, value;
-
-        while ((({ done, value } = await reader.read()), !done)) {
-            if (value) chunks.push(value);
-        }
-        reader.releaseLock();
-
-        const totalLength = chunks.reduce(
-            (acc, chunk) => acc + chunk.length,
-            0
+        const head = `${request.method} ${request.url} HTTP/1.1\r\n${headers.join('\r\n')}\r\n\r\n`;
+        const headBytes = this.encodeAsciiHead(head, 'request');
+        const serialized = new Uint8Array(
+            headBytes.byteLength + body.byteLength
         );
-        const result = new Uint8Array(totalLength);
-        let offset = 0;
-
-        for (const chunk of chunks) {
-            result.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        return result;
+        serialized.set(headBytes);
+        serialized.set(body, headBytes.byteLength);
+        return serialized;
     }
 
     private async unwrap(
         wrapper: Response,
         sender: string,
-        receiver: string
+        receiver: string,
+        requestMethod: string
     ): Promise<Response> {
         const signature = wrapper.headers.get(HEADER_SIG);
         if (!signature) {
@@ -370,7 +382,8 @@ export class EssrAuthenticator extends Authenticator {
         }
 
         const response = EssrAuthenticator.deserializeResponse(
-            d(this.decrypt(ciphertext))
+            this.decrypt(ciphertext),
+            requestMethod
         );
 
         if (response.headers.get(HEADER_SIG_SENDER) !== sender) {
@@ -398,31 +411,168 @@ export class EssrAuthenticator extends Authenticator {
         }
     }
 
-    static deserializeResponse(httpString: string): Response {
-        const sep = httpString.indexOf('\r\n\r\n');
-        const head =
-            sep === -1 ? httpString.trimEnd() : httpString.slice(0, sep);
+    /** Parse KERIA's finite ESSR response envelope without decoding its body. */
+    static deserializeResponse(
+        httpBytes: Uint8Array,
+        requestMethod?: string
+    ): Response {
+        const separator = this.findHeaderSeparator(httpBytes);
+        if (separator === -1) {
+            throw new Error(
+                'Failed to deserialize ESSR response - missing CRLFCRLF separator'
+            );
+        }
 
+        const head = this.decodeAsciiHead(
+            httpBytes.subarray(0, separator),
+            'response'
+        );
         const [statusLine, ...headerLines] = head.split('\r\n');
-        const [, statusCode, ...statusTextArr] = statusLine.split(' ');
+        const statusMatch = RESPONSE_STATUS_LINE.exec(statusLine);
+        if (statusMatch === null) {
+            throw new Error(
+                'Failed to deserialize ESSR response - invalid status line'
+            );
+        }
 
-        const body = sep === -1 ? '' : httpString.slice(sep + 4);
+        const status = Number(statusMatch[1]);
+        if (status < 200 || status > 599) {
+            throw new Error(
+                'Failed to deserialize ESSR response - unsupported status code'
+            );
+        }
+        const statusText = statusMatch[2] ?? '';
+        if (
+            [...statusText].some(
+                (character) =>
+                    character.charCodeAt(0) < 32 ||
+                    character.charCodeAt(0) === 127
+            )
+        ) {
+            throw new Error(
+                'Failed to deserialize ESSR response - invalid status text'
+            );
+        }
 
+        const body = httpBytes.slice(separator + HEADER_SEPARATOR.byteLength);
         const headers = new Headers();
+        const contentLengths: string[] = [];
         for (const line of headerLines) {
             const i = line.indexOf(':');
-            if (i !== -1) {
-                headers.append(
-                    line.slice(0, i).trim(),
-                    line.slice(i + 1).trim()
+            const name = line.slice(0, i);
+            if (i < 1 || !HTTP_TOKEN.test(name)) {
+                throw new Error(
+                    'Failed to deserialize ESSR response - invalid header field'
+                );
+            }
+            const value = line.slice(i + 1).trim();
+            if (
+                [...value].some(
+                    (character) =>
+                        (character.charCodeAt(0) < 32 && character !== '\t') ||
+                        character.charCodeAt(0) === 127
+                )
+            ) {
+                throw new Error(
+                    'Failed to deserialize ESSR response - invalid header value'
+                );
+            }
+
+            const lowerName = name.toLowerCase();
+            if (lowerName === 'transfer-encoding') {
+                throw new Error(
+                    'Failed to deserialize ESSR response - Transfer-Encoding is unsupported'
+                );
+            }
+            if (lowerName === 'content-length') {
+                contentLengths.push(value);
+            }
+            headers.append(name, value);
+        }
+
+        if (
+            contentLengths.length > 1 ||
+            (contentLengths.length === 1 && !/^\d+$/.test(contentLengths[0]))
+        ) {
+            throw new Error(
+                'Failed to deserialize ESSR response - invalid Content-Length'
+            );
+        }
+
+        const method = requestMethod?.toUpperCase();
+        const bodyless = method === 'HEAD' || [204, 205, 304].includes(status);
+        if (bodyless && body.byteLength !== 0) {
+            throw new Error(
+                'Failed to deserialize ESSR response - body is forbidden for this response'
+            );
+        }
+
+        if (contentLengths.length === 1) {
+            if (status === 204) {
+                throw new Error(
+                    'Failed to deserialize ESSR response - Content-Length is forbidden for 204'
+                );
+            }
+            if (status === 205 && !contentLengthEquals(contentLengths[0], 0)) {
+                throw new Error(
+                    'Failed to deserialize ESSR response - 205 Content-Length must be zero'
+                );
+            }
+            if (
+                method !== 'HEAD' &&
+                status !== 304 &&
+                !contentLengthEquals(contentLengths[0], body.byteLength)
+            ) {
+                throw new Error(
+                    'Failed to deserialize ESSR response - Content-Length does not match the body'
                 );
             }
         }
 
-        return new Response(body.length ? body : null, {
-            status: Number(statusCode),
-            statusText: statusTextArr.join(' '),
+        return new Response(bodyless || body.byteLength === 0 ? null : body, {
+            status,
+            statusText,
             headers,
         });
+    }
+
+    private static encodeAsciiHead(
+        head: string,
+        messageType: string
+    ): Uint8Array {
+        for (let i = 0; i < head.length; i++) {
+            if (head.charCodeAt(i) > 127) {
+                throw new Error(
+                    `Failed to serialize ESSR ${messageType} - head must be ASCII`
+                );
+            }
+        }
+        return new TextEncoder().encode(head);
+    }
+
+    private static decodeAsciiHead(
+        head: Uint8Array,
+        messageType: string
+    ): string {
+        if (head.some((value) => value > 127)) {
+            throw new Error(
+                `Failed to deserialize ESSR ${messageType} - head must be ASCII`
+            );
+        }
+        return new TextDecoder().decode(head);
+    }
+
+    private static findHeaderSeparator(message: Uint8Array): number {
+        const lastStart = message.byteLength - HEADER_SEPARATOR.byteLength;
+        for (let i = 0; i <= lastStart; i++) {
+            if (
+                HEADER_SEPARATOR.every(
+                    (value, offset) => message[i + offset] === value
+                )
+            ) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

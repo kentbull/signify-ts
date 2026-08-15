@@ -79,6 +79,33 @@ Typescript source files needs to be transpiled before running scripts or integra
     console.log(actualSignifyClient);
     ```
 
+### ESSR and binary HTTP bodies
+
+`AuthMode.ESSR` signs and encrypts one complete, finite HTTP request and
+response. Its inner message is an ESSR-specific HTTP envelope, not a general
+HTTP transport. The envelope head is ASCII; request and response bodies remain
+exact bytes.
+
+`SignifyClient.fetch()` retains its existing JSON-oriented behavior. Use
+`fetchRequest()` when a KERIA endpoint accepts or returns non-JSON bytes:
+
+```typescript
+const image = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+await client.fetchRequest(`/contacts/${prefix}/img`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/png' },
+    body: image,
+});
+
+const response = await client.fetchRequest(`/contacts/${prefix}/img`);
+const downloaded = new Uint8Array(await response.arrayBuffer());
+```
+
+ESSR buffers the complete body before sealing or opening it. It does not
+support infinite request bodies or progressive responses such as SSE. Use
+signed-header mode for a live response stream unless a framed ESSR streaming
+protocol is specified in the future.
+
 ### Unit testing
 
 To run unit tests
@@ -141,6 +168,9 @@ TEST_ENVIRONMENT=local npm run test:integration test-integration/credentials.tes
 ```
 
 This changes the discovery urls to use `localhost` instead of the hostnames inside the docker network.
+
+Set `KERIA_URL` and `KERIA_BOOT_URL` to run an integration test against KERIA
+admin and boot interfaces on non-default host ports.
 
 # Diagrams
 

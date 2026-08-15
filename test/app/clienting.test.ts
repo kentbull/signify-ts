@@ -353,6 +353,38 @@ describe('SignifyClient', () => {
         );
     });
 
+    test('Client authenticated fetchRequest preserves a binary body', async () => {
+        const prepareSpy = vi.spyOn(
+            SignedHeaderAuthenticator.prototype,
+            'prepare'
+        );
+        const client = new SignifyClient(url, bran, Tier.low, boot_url);
+
+        await expect(
+            client.fetchRequest('/contacts/prefix/img')
+        ).rejects.toThrow('Client needs to call connect first');
+
+        await client.connect();
+        const body = new Uint8Array([0xff, 0xfe, 0, 13, 10, 0x85]);
+        await client.fetchRequest('/contacts/prefix/img', {
+            method: 'POST',
+            body,
+            headers: { 'Content-Type': 'application/octet-stream' },
+        });
+
+        const request = prepareSpy.mock.calls
+            .map((call) => call[0])
+            .find((candidate) =>
+                candidate.url.endsWith('/contacts/prefix/img')
+            )!;
+        assert.equal(request.method, 'POST');
+        assert.equal(
+            request.headers.get('Content-Type'),
+            'application/octet-stream'
+        );
+        assert.deepEqual(new Uint8Array(await request.arrayBuffer()), body);
+    });
+
     test('Sends the request body verbatim, without escaping separators', async () => {
         const prepareSpy = vi.spyOn(
             SignedHeaderAuthenticator.prototype,
