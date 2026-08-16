@@ -248,8 +248,10 @@ describe('ESSR Authenticator', () => {
 
         const authn = new EssrAuthenticator(signer, agentSigner.verfer);
 
+        const abortController = new AbortController();
         const getReq = new Request('http://127.0.0.1:3901/oobis', {
             method: 'GET',
+            signal: abortController.signal,
         });
 
         const wrapperGet = await authn.prepare(
@@ -309,6 +311,8 @@ content-length: 0\r
 \r
 `
         );
+        abortController.abort();
+        assert.equal(wrapperGet.signal.aborted, true);
 
         const postReq = new Request('http://127.0.0.1:3901/oobis', {
             method: 'POST',
@@ -364,6 +368,21 @@ content-length: 7\r
                 'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
             )
         ).rejects.toThrow('HTTP GET /xyz - 401 Unauthorized');
+
+        await expect(
+            authn.verify(
+                new Request('http://test.com/xyz'),
+                new Response(null, {
+                    headers,
+                    status: 500,
+                    statusText: 'Internal Server Error',
+                }),
+                'ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose',
+                'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
+            )
+        ).rejects.toThrow(
+            'ESSR wrapper HTTP GET /xyz - 500 Internal Server Error'
+        );
 
         await expect(
             authn.verify(
@@ -889,6 +908,7 @@ Hi`)
         [b('HTTP/1.1 304 Not Modified\r\n\r\nbody'), undefined],
         [b('HTTP/1.1 200 OK\r\n\r\nbody'), 'HEAD'],
         [b('HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n'), undefined],
+        [b('HTTP/1.1 200 OK\r\nx-test: \vbad\r\n\r\n'), undefined],
         [b('HTTP/2 200 OK\r\n\r\n'), undefined],
         [
             new Uint8Array([

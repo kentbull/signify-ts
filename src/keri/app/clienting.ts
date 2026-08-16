@@ -43,6 +43,13 @@ export enum AuthMode {
     ESSR = 'ESSR',
 }
 
+export interface FiniteRequestInit {
+    method?: string;
+    headers?: HeadersInit;
+    body?: XMLHttpRequestBodyInit | null;
+    signal?: AbortSignal | null;
+}
+
 function jsonBody(data: unknown): string | null {
     // typed as string, but returns undefined for undefined/functions/symbols
     const json: string | undefined = JSON.stringify(data);
@@ -244,12 +251,12 @@ export class SignifyClient {
      * streams are not supported.
      *
      * @param {string} path Path to the KERIA resource
-     * @param {RequestInit} [init] Standard Fetch API request options
+     * @param {FiniteRequestInit} [init] Finite body and cancellation options
      * @returns {Promise<Response>} A promise to the authenticated response
      */
     async fetchRequest(
         path: string,
-        init: RequestInit = {}
+        init: FiniteRequestInit = {}
     ): Promise<Response> {
         if (!this.authn) {
             throw new Error('Client needs to call connect first');

@@ -169,9 +169,6 @@ TEST_ENVIRONMENT=local npm run test:integration test-integration/credentials.tes
 
 This changes the discovery urls to use `localhost` instead of the hostnames inside the docker network.
 
-Set `KERIA_URL` and `KERIA_BOOT_URL` to run an integration test against KERIA
-admin and boot interfaces on non-default host ports.
-
 # Diagrams
 
 Account Creation Workflow

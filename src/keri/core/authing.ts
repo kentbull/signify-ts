@@ -263,6 +263,7 @@ export class EssrAuthenticator extends Authenticator {
             method: 'POST',
             body: raw,
             headers,
+            signal: request.signal,
         });
     }
 
@@ -275,6 +276,11 @@ export class EssrAuthenticator extends Authenticator {
         if (response.status === 401) {
             throw new Error(
                 `HTTP ${request.method} ${new URL(request.url).pathname} - ${response.status} ${response.statusText}`
+            );
+        }
+        if (response.status !== 200) {
+            throw new Error(
+                `ESSR wrapper HTTP ${request.method} ${new URL(request.url).pathname} - ${response.status} ${response.statusText}`
             );
         }
 
@@ -465,7 +471,7 @@ export class EssrAuthenticator extends Authenticator {
                     'Failed to deserialize ESSR response - invalid header field'
                 );
             }
-            const value = line.slice(i + 1).trim();
+            const value = line.slice(i + 1).replace(/^[ \t]+|[ \t]+$/g, '');
             if (
                 [...value].some(
                     (character) =>
