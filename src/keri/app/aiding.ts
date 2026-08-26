@@ -7,7 +7,11 @@ import { MtrDex } from '../core/matter.ts';
 import { Serder } from '../core/serder.ts';
 import { parseRangeHeaders } from '../core/httping.ts';
 import { IdentifierManagerFactory } from '../core/keeping.ts';
-import { HabState } from '../core/keyState.ts';
+import {
+    HabState,
+    PendingHabState,
+    requireKeyState,
+} from '../core/keyState.ts';
 import { components } from '../../types/keria-api-schema.ts';
 
 /** Arguments required to create an identfier */
@@ -127,14 +131,36 @@ export class Identifier {
      * Get information for a managed identifier
      * @async
      * @param {string} name Prefix or alias of the identifier
-     * @returns {Promise<HabState>} A promise to the identifier information
+     * @param {boolean} [requireAccepted=true] When true, requires key state to
+     *      be present and throws otherwise. Key state is absent only for a
+     *      multisig group whose inception is still collecting member
+     *      signatures; pass false to fetch such a pending group.
+     * @returns {Promise<HabState | PendingHabState>} A promise to the
+     *      identifier information, narrowed to HabState unless requireAccepted
+     *      is false
      */
-    async get(name: string): Promise<HabState> {
-        const path = `/identifiers/${encodeURIComponent(name)}`;
+    async get(name: string, requireAccepted?: true): Promise<HabState>;
+    async get(
+        name: string,
+        requireAccepted: false
+    ): Promise<HabState | PendingHabState>;
+    async get(
+        name: string,
+        requireAccepted: boolean
+    ): Promise<HabState | PendingHabState>;
+    async get(
+        name: string,
+        requireAccepted = true
+    ): Promise<HabState | PendingHabState> {
+        const path = `/identifiers/${name}`;
         const data = null;
         const method = 'GET';
         const res = await this.client.fetch(path, method, data);
-        return await res.json();
+        const hab: HabState | PendingHabState = await res.json();
+        if (requireAccepted) {
+            requireKeyState(hab);
+        }
+        return hab;
     }
 
     /**
@@ -142,13 +168,41 @@ export class Identifier {
      * @async
      * @param {string} name Prefix or alias of the identifier
      * @param {IdentifierInfo} info Information to update for the given identifier
-     * @returns {Promise<HabState>} A promise to the identifier information after updating
+     * @param {boolean} [requireAccepted=true] When true, requires key state to
+     *      be present on the updated identifier and throws otherwise; pass
+     *      false to update a still-pending multisig group.
+     * @returns {Promise<HabState | PendingHabState>} A promise to the
+     *      identifier information after updating, narrowed to HabState unless
+     *      requireAccepted is false
      */
-    async update(name: string, info: IdentifierInfo): Promise<HabState> {
+    async update(
+        name: string,
+        info: IdentifierInfo,
+        requireAccepted?: true
+    ): Promise<HabState>;
+    async update(
+        name: string,
+        info: IdentifierInfo,
+        requireAccepted: false
+    ): Promise<HabState | PendingHabState>;
+    async update(
+        name: string,
+        info: IdentifierInfo,
+        requireAccepted: boolean
+    ): Promise<HabState | PendingHabState>;
+    async update(
+        name: string,
+        info: IdentifierInfo,
+        requireAccepted = true
+    ): Promise<HabState | PendingHabState> {
         const path = `/identifiers/${name}`;
         const method = 'PUT';
         const res = await this.client.fetch(path, method, info);
-        return await res.json();
+        const hab: HabState | PendingHabState = await res.json();
+        if (requireAccepted) {
+            requireKeyState(hab);
+        }
+        return hab;
     }
 
     /**

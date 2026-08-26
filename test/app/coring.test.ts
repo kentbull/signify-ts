@@ -11,7 +11,10 @@ import { SignifyClient } from '../../src/keri/app/clienting.ts';
 import { Tier } from '../../src/keri/core/salter.ts';
 import { randomUUID } from 'node:crypto';
 import { createMockFetch } from './test-utils.ts';
-import { RegistryOperation } from '../../src/keri/core/keyState.ts';
+import {
+    KelOperation,
+    RegistryOperation,
+} from '../../src/keri/core/keyState.ts';
 
 const url = 'http://127.0.0.1:3901';
 const boot_url = 'http://127.0.0.1:3903';
@@ -43,21 +46,27 @@ describe('Coring', () => {
 
         await oobis.get('aid', 'agent');
         let lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        assert.equal(lastCall[0]!, url + '/identifiers/aid/oobis?role=agent');
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.instanceOf(lastCall[0], Request);
+        assert.equal(
+            lastCall[0].url,
+            url + '/identifiers/aid/oobis?role=agent'
+        );
+        assert.equal(lastCall[0].method, 'GET');
 
         await oobis.resolve('http://oobiurl.com');
         lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        let lastBody = JSON.parse(lastCall[1]!.body!.toString());
-        assert.equal(lastCall[0]!, url + '/oobis');
-        assert.equal(lastCall[1]!.method, 'POST');
+        assert.instanceOf(lastCall[0], Request);
+        let lastBody = JSON.parse(await lastCall[0].text());
+        assert.equal(lastCall[0].url, url + '/oobis');
+        assert.equal(lastCall[0].method, 'POST');
         assert.deepEqual(lastBody.url, 'http://oobiurl.com');
 
         await oobis.resolve('http://oobiurl.com', 'witness');
         lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        lastBody = JSON.parse(lastCall[1]!.body!.toString());
-        assert.equal(lastCall[0]!, url + '/oobis');
-        assert.equal(lastCall[1]!.method, 'POST');
+        assert.instanceOf(lastCall[0], Request);
+        lastBody = JSON.parse(await lastCall[0].text());
+        assert.equal(lastCall[0].url, url + '/oobis');
+        assert.equal(lastCall[0].method, 'POST');
         assert.deepEqual(lastBody.url, 'http://oobiurl.com');
         assert.deepEqual(lastBody.oobialias, 'witness');
     });
@@ -76,8 +85,9 @@ describe('Coring', () => {
 
         await oobis.endroles(aid);
         const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        assert.equal(lastCall[0]!, url + `/endroles/${aid}`);
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.instanceOf(lastCall[0], Request);
+        assert.equal(lastCall[0].url, url + `/endroles/${aid}`);
+        assert.equal(lastCall[0].method, 'GET');
     });
 
     it('Endroles with role filter', async () => {
@@ -94,8 +104,9 @@ describe('Coring', () => {
 
         await oobis.endroles(aid, 'agent');
         const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        assert.equal(lastCall[0]!, url + `/endroles/${aid}/agent`);
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.instanceOf(lastCall[0], Request);
+        assert.equal(lastCall[0].url, url + `/endroles/${aid}/agent`);
+        assert.equal(lastCall[0].method, 'GET');
     });
 
     it('Events and states', async () => {
@@ -112,31 +123,34 @@ describe('Coring', () => {
 
         await keyEvents.get('EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX');
         let lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
+        assert.instanceOf(lastCall[0], Request);
         assert.equal(
-            lastCall[0]!,
+            lastCall[0].url,
             url + '/events?pre=EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX'
         );
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.equal(lastCall[0].method, 'GET');
 
         await keyStates.get('EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX');
         lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
+        assert.instanceOf(lastCall[0], Request);
         assert.equal(
-            lastCall[0]!,
+            lastCall[0].url,
             url + '/states?pre=EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX'
         );
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.equal(lastCall[0].method, 'GET');
 
         await keyStates.list([
             'EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX',
             'ELUvZ8aJEHAQE-0nsevyYTP98rBbGJUrTj5an-pCmwrK',
         ]);
         lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
+        assert.instanceOf(lastCall[0], Request);
         assert.equal(
-            lastCall[0]!,
+            lastCall[0].url,
             url +
                 '/states?pre=EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX&pre=ELUvZ8aJEHAQE-0nsevyYTP98rBbGJUrTj5an-pCmwrK'
         );
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.equal(lastCall[0].method, 'GET');
 
         await keyStates.query(
             'EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX',
@@ -144,9 +158,10 @@ describe('Coring', () => {
             'EBfdlu8R27Fbx-ehrqwImnK-8Cm79sqbAQ4MmvEAYqao'
         );
         lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        const lastBody = JSON.parse(lastCall[1]!.body!.toString());
-        assert.equal(lastCall[0]!, url + '/queries');
-        assert.equal(lastCall[1]!.method, 'POST');
+        assert.instanceOf(lastCall[0], Request);
+        const lastBody = JSON.parse(await lastCall[0].text());
+        assert.equal(lastCall[0].url, url + '/queries');
+        assert.equal(lastCall[0].method, 'POST');
         assert.equal(
             lastBody.pre,
             'EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX'
@@ -171,8 +186,9 @@ describe('Coring', () => {
 
         await config.get();
         const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]!;
-        assert.equal(lastCall[0]!, url + '/config');
-        assert.equal(lastCall[1]!.method, 'GET');
+        assert.instanceOf(lastCall[0], Request);
+        assert.equal(lastCall[0].url, url + '/config');
+        assert.equal(lastCall[0].method, 'GET');
     });
 });
 
@@ -328,7 +344,7 @@ describe('Operations', () => {
         it('returns when child operation is also done', async () => {
             const name = randomUUID();
             const nestedName = randomUUID();
-            const depends: Operation = { name: nestedName, done: false };
+            const depends: KelOperation = { name: nestedName, done: false };
             const op: RegistryOperation = {
                 name,
                 done: false,

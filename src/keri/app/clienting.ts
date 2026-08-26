@@ -1,3 +1,9 @@
+import {
+    EssrAuthenticator,
+    SignedHeaderAuthenticator,
+    Authenticator,
+} from '../core/authing.ts';
+import { HEADER_SIG_SENDER, HEADER_SIG_TIME } from '../core/httping.ts';
 import { components } from '../../types/keria-api-schema.ts';
 import { Authenticater } from '../core/authing.ts';
 import { HEADER_SIG_TIME } from '../core/httping.ts';
@@ -40,21 +46,34 @@ class State {
     }
 }
 
+export enum AuthMode {
+    SignedHeaders = 'SIGNED_HEADERS',
+    ESSR = 'ESSR',
+}
+
+function jsonBody(data: unknown): string | null {
+    // typed as string, but returns undefined for undefined/functions/symbols
+    const json: string | undefined = JSON.stringify(data);
+    return json ?? null;
+}
+
 /**
  * An in-memory key manager that can connect to a KERIA Agent and use it to
  * receive messages and act as a proxy for multi-signature operations and delegation operations.
  */
 export class SignifyClient {
-    public controller: Controller;
-    public url: string;
-    public bran: string;
-    public pidx: number;
-    public agent: Agent | null;
-    public authn: Authenticater | null;
-    public manager: IdentifierManagerFactory | null;
-    public tier: Tier;
-    public bootUrl: string;
-    public exteralModules: ExternalModule[];
+    controller: Controller;
+    url: string;
+    bran: string;
+    pidx: number;
+    agent: Agent | null;
+    authn: Authenticator | null;
+    manager: IdentifierManagerFactory | null;
+    tier: Tier;
+    bootUrl: string;
+    exteralModules: ExternalModule[];
+    authMode: AuthMode;
+
     private _identifiers = new Identifier(this);
     private _operations = new Operations(this);
     private _keyEvents = new KeyEvents(this);
@@ -86,7 +105,8 @@ export class SignifyClient {
         bran: string,
         tier: Tier = Tier.low,
         bootUrl: string = DEFAULT_BOOT_URL,
-        externalModules: ExternalModule[] = []
+        externalModules: ExternalModule[] = [],
+        authMode: AuthMode = AuthMode.SignedHeaders
     ) {
         this.url = url;
         if (bran.length < 21) {
@@ -101,6 +121,7 @@ export class SignifyClient {
         this.tier = tier;
         this.bootUrl = bootUrl;
         this.exteralModules = externalModules;
+        this.authMode = authMode;
     }
 
     get data() {
@@ -207,10 +228,18 @@ export class SignifyClient {
             this.controller.salter,
             this.exteralModules
         );
-        this.authn = new Authenticater(
-            this.controller.signer,
-            this.agent.verfer!
-        );
+
+        if (this.authMode === AuthMode.SignedHeaders) {
+            this.authn = new SignedHeaderAuthenticator(
+                this.controller.signer,
+                this.agent.verfer!
+            );
+        } else {
+            this.authn = new EssrAuthenticator(
+                this.controller.signer,
+                this.agent.verfer!
+            );
+        }
     }
 
     /**
@@ -218,73 +247,64 @@ export class SignifyClient {
      * @async
      * @param {string} path Path to the resource
      * @param {string} method HTTP method
-     * @param {any} data Data to be sent in the body of the resource
+     * @param {unknown} [data] Data to be sent in the body of the resource
      * @param {Headers} [extraHeaders] Optional extra headers to be sent with the request
      * @returns {Promise<Response>} A promise to the result of the fetch
      */
     async fetch(
         path: string,
         method: string,
-        data: any,
+        data?: unknown,
         extraHeaders?: Headers
     ): Promise<Response> {
-        const headers = new Headers();
-        let signed_headers = new Headers();
-        const final_headers = new Headers();
+        if (!this.authn) {
+            throw new Error('Client needs to call connect first');
+        }
 
-        headers.set('Signify-Resource', this.controller.pre);
+        const headers = new Headers();
+        headers.set(HEADER_SIG_SENDER, this.controller.pre);
         headers.set(
             HEADER_SIG_TIME,
             new Date().toISOString().replace('Z', '000+00:00')
         );
-        headers.set('Content-Type', 'application/json');
 
-        const _body = method === 'GET' ? null : JSON.stringify(data);
-
-        if (this.authn) {
-            signed_headers = this.authn.sign(
-                headers,
-                method,
-                path.split('?')[0]
-            );
-        } else {
-            throw new Error('client need to call connect first');
-        }
-
-        signed_headers.forEach((value, key) => {
-            final_headers.set(key, value);
-        });
-        if (extraHeaders !== undefined) {
+        if (extraHeaders) {
             extraHeaders.forEach((value, key) => {
-                final_headers.append(key, value);
+                headers.append(key, value);
             });
         }
-        const res = await fetch(this.url + path, {
-            method: method,
-            body: _body,
-            headers: final_headers,
-        });
-        if (!res.ok) {
-            const error = await res.text();
-            const message = `HTTP ${method} ${path} - ${res.status} ${res.statusText} - ${error}`;
-            throw new Error(message);
-        }
-        const isSameAgent =
-            this.agent?.pre === res.headers.get('signify-resource');
-        if (!isSameAgent) {
-            throw new Error('message from a different remote agent');
+
+        const body = method == 'GET' ? null : jsonBody(data);
+        if (body) {
+            headers.set('Content-Type', 'application/json');
         }
 
-        const verification = this.authn.verify(
-            res.headers,
+        const baseRequest = new Request(this.url + path, {
             method,
-            path.split('?')[0]
+            body,
+            headers,
+        });
+        const request = await this.authn.prepare(
+            baseRequest,
+            this.controller.pre,
+            this.agent!.pre
         );
-        if (verification) {
-            return res;
-        } else {
-            throw new Error('response verification failed');
+
+        const res = await this.authn.verify(
+            baseRequest,
+            await fetch(request),
+            this.controller.pre,
+            this.agent!.pre
+        );
+
+        if (!res.ok) {
+            const error = await res.text();
+            throw new Error(
+                `HTTP ${method} ${path} - ${res.status} ${res.statusText} - ${error}`
+            );
         }
+
+        return res;
     }
 
     /**
@@ -309,26 +329,27 @@ export class SignifyClient {
         const hab = await this.identifiers().get(aidName);
         const keeper = this.manager!.get(hab);
 
-        const authenticator = new Authenticater(
+        const authenticator = new SignedHeaderAuthenticator(
             keeper.signers[0],
             keeper.signers[0].verfer
         );
 
         const headers = new Headers(req.headers);
-        headers.set('Signify-Resource', hab['prefix']);
+        headers.set(HEADER_SIG_SENDER, hab.prefix);
         headers.set(
             HEADER_SIG_TIME,
             new Date().toISOString().replace('Z', '000+00:00')
         );
 
-        const signed_headers = authenticator.sign(
-            new Headers(headers),
-            req.method ?? 'GET',
-            new URL(url).pathname
+        return await authenticator.prepare(
+            new Request(url, {
+                headers,
+                method: req.method ?? 'GET',
+                body: req.body,
+            }),
+            hab.prefix,
+            hab.prefix
         );
-        req.headers = signed_headers;
-
-        return new Request(url, req);
     }
 
     /**
@@ -337,7 +358,7 @@ export class SignifyClient {
      * @param {ConnectionOptions} [options] Cancellation options
      * @returns {Promise<Response>} A promise to the result of the approval
      */
-    async approveDelegation(
+   private async approveDelegation(
         options: ConnectionOptions = {}
     ): Promise<Response> {
         options.signal?.throwIfAborted();

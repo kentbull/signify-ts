@@ -23,17 +23,55 @@ export type RandyKeyState = components['schemas']['RandyKeyState'];
 /**
  * Defining properties a multi-signature group identifier manager.
  */
-export type GroupKeyState = components['schemas']['GroupKeyState'];
+export type GroupKeyState = Omit<
+    components['schemas']['GroupKeyState'],
+    'mhab'
+> & {
+    // The local member AID must be fully inceptioned before it can participate in the group,
+    // so its key state is always present even while the group's own state is not — hence HabState.
+    mhab: HabState;
+};
 
 /**
  * Defining properties for an external module identifier manager that uses externally managed keys such as in an HSM or a KMS system.
  */
 export type ExternState = components['schemas']['ExternState'];
 
+type SchemaHabState = components['schemas']['HabState'];
+
 /**
- * Defining properties of an identifier habitat, know as a Hab in KERIpy.
+ * Defining properties of an identifier habitat, known as a Hab in KERIpy.
+ *
+ * Omitting `state` alone would erase the algo variants — `keyof` a union of disjoint objects is
+ * `never` — so they are re-spelled, which also points `group` at the local GroupKeyState above.
  */
-export type HabState = components['schemas']['HabState'];
+type BaseHabState = Omit<
+    SchemaHabState,
+    'state' | 'salty' | 'randy' | 'group' | 'extern'
+> &
+    (
+        | { salty: SaltyKeyState }
+        | { randy: RandyKeyState }
+        | { group: GroupKeyState }
+        | { extern: ExternState }
+    );
+
+/** Multisig group whose inception is still collecting member signatures; no key state yet. */
+export type PendingHabState = BaseHabState & { state?: undefined };
+
+/** Fully inceptioned identifier; key state present. */
+export type HabState = BaseHabState & { state: KeyState };
+
+export function isAccepted(hab: HabState | PendingHabState): hab is HabState {
+    return hab.state !== undefined;
+}
+
+export function requireKeyState(hab: HabState | PendingHabState): KeyState {
+    if (!isAccepted(hab)) {
+        throw new Error(`No key state for identifier ${hab.name}`);
+    }
+    return hab.state;
+}
 
 export type Icp =
     | components['schemas']['ICP_V_1']
@@ -68,6 +106,7 @@ export type DoneOperation = components['schemas']['DoneOperation'];
 export type CredentialOperation = components['schemas']['CredentialOperation'];
 export type GroupOperation = components['schemas']['GroupOperation'];
 export type DelegatorOperation = components['schemas']['DelegatorOperation'];
+export type KelOperation = components['schemas']['KelOperation'];
 
 export type PendingOOBIOperation =
     components['schemas']['PendingOOBIOperation'];
