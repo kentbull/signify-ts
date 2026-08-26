@@ -325,6 +325,13 @@ test('delegation-multisig', async () => {
 
     const teeDone1 = await waitOperation(delegatee1Client, opDelegatee1);
     const teeDone2 = await waitOperation(delegatee2Client, opDelegatee2);
+
+    const [delegationRequest] = await waitForNotifications(
+        delegator2Client,
+        '/delegate/request'
+    );
+    await markAndRemoveNotification(delegator2Client, delegationRequest);
+
     console.log('Delegated multisig created!');
 
     const agtee = await delegatee1Client.identifiers().get(delegateeGroupName);
