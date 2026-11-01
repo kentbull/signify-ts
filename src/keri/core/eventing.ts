@@ -318,7 +318,7 @@ export function incept({
     if (ntholder.num != undefined && ntholder.num < 0) {
         throw new Error(`Invalid nsith = ${ntholder.num} less than 0.`);
     }
-    if (ntholder.size > keys.length) {
+    if (ntholder.size > ndigs.length) {
         throw new Error(`Invalid nsith = ${ntholder.num} for keys ${ndigs}`);
     }
 

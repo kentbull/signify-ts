@@ -207,6 +207,30 @@ describe('key event function', () => {
         );
     });
 
+    it('allows more next-key commitments than current keys', () => {
+        const keys = [
+            new Signer({ transferable: true }).verfer.qb64,
+            new Signer({ transferable: true }).verfer.qb64,
+        ];
+        const ndigs = [
+            new Signer({ transferable: true }),
+            new Signer({ transferable: true }),
+            new Signer({ transferable: true }),
+        ].map((signer) => new Diger({}, signer.verfer.qb64b).qb64);
+
+        const serder = incept({
+            keys,
+            isith: 2,
+            ndigs,
+            nsith: 3,
+            code: MtrDex.Blake3_256,
+        });
+
+        assert.equal(serder.sad.kt, '2');
+        assert.equal(serder.sad.nt, '3');
+        assert.deepEqual(serder.sad.n, ndigs);
+    });
+
     describe('rotate', () => {
         const icp = createIdentifier();
 

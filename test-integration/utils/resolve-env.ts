@@ -18,8 +18,9 @@ export function resolveEnvironment(
 ): TestEnvironment {
     const preset = input ?? process.env.TEST_ENVIRONMENT ?? 'docker';
 
-    const url = 'http://127.0.0.1:3901';
-    const bootUrl = 'http://127.0.0.1:3903';
+    const url = process.env.SIGNIFY_TS_KERIA_URL ?? 'http://127.0.0.1:3901';
+    const bootUrl =
+        process.env.SIGNIFY_TS_KERIA_BOOT_URL ?? 'http://127.0.0.1:3903';
 
     switch (preset) {
         case 'docker':
@@ -33,14 +34,17 @@ export function resolveEnvironment(
                     'http://witness-demo:5644',
                 ],
                 witnessIds: [WAN, WIL, WES],
-                vleiServerUrl: 'http://vlei-server:7723',
+                vleiServerUrl:
+                    process.env.SIGNIFY_TS_VLEI_URL ??
+                    'http://vlei-server:7723',
             };
         case 'local':
             return {
                 preset: preset,
                 url,
                 bootUrl,
-                vleiServerUrl: 'http://localhost:7723',
+                vleiServerUrl:
+                    process.env.SIGNIFY_TS_VLEI_URL ?? 'http://localhost:7723',
                 witnessUrls: [
                     'http://localhost:5642',
                     'http://localhost:5643',
