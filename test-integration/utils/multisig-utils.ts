@@ -11,8 +11,16 @@ import signify, {
     assertMultisigIcp,
     assertMultisigIxn,
 } from 'signify-ts';
-import { getStates, waitAndMarkNotification } from './test-util.ts';
+import {
+    createTimestamp,
+    getOrCreateIdentifier,
+    getStates,
+    resolveOobi,
+    waitAndMarkNotification,
+    waitOperation,
+} from './test-util.ts';
 import assert from 'assert';
+import { resolveEnvironment } from './resolve-env.ts';
 
 export interface AcceptMultisigInceptArgs {
     groupName: string;
@@ -29,6 +37,13 @@ export interface StartMultisigInceptArgs {
     toad?: number;
     wits?: string[];
     delpre?: string;
+}
+
+export interface TwoMemberGroupResult {
+    memberAPrefix: string;
+    memberBPrefix: string;
+    groupA: HabState;
+    groupB: HabState;
 }
 
 export async function acceptMultisigIncept(
@@ -514,4 +529,118 @@ export async function startMultisigIncept(
             participants
         );
     return op1;
+}
+
+export async function createTwoMemberGroup(
+    clientA: SignifyClient,
+    memberAName: string,
+    clientB: SignifyClient,
+    memberBName: string,
+    groupName: string
+): Promise<TwoMemberGroupResult> {
+    const env = resolveEnvironment();
+    const [[memberAPrefix, memberAOobi], [memberBPrefix, memberBOobi]] =
+        await Promise.all([
+            getOrCreateIdentifier(clientA, memberAName),
+            getOrCreateIdentifier(clientB, memberBName),
+        ]);
+
+    await Promise.all([
+        resolveOobi(clientA, memberBOobi, memberBName),
+        resolveOobi(clientB, memberAOobi, memberAName),
+    ]);
+
+    const opA = await startMultisigIncept(clientA, {
+        groupName,
+        localMemberName: memberAName,
+        participants: [memberAPrefix, memberBPrefix],
+        toad: env.witnessIds.length,
+        isith: 2,
+        nsith: 2,
+        wits: env.witnessIds,
+    });
+
+    const proposalSaid = await waitAndMarkNotification(
+        clientB,
+        '/multisig/icp'
+    );
+    assert(proposalSaid, 'multisig inception proposal SAID missing');
+    const opB = await acceptMultisigIncept(clientB, {
+        groupName,
+        localMemberName: memberBName,
+        msgSaid: proposalSaid,
+    });
+
+    await Promise.all([
+        waitOperation(clientA, opA),
+        waitOperation(clientB, opB),
+    ]);
+
+    const [groupA, groupB] = await Promise.all([
+        clientA.identifiers().get(groupName),
+        clientB.identifiers().get(groupName),
+    ]);
+    assert.equal(groupA.prefix, groupB.prefix);
+
+    return {
+        memberAPrefix,
+        memberBPrefix,
+        groupA,
+        groupB,
+    };
+}
+
+/**
+ * Strip the final agent AID off of the multisig OOBI and "/agent/" path segment to
+ * return a valid multisig OOBI that will properly return endpoint roles and location
+ * scheme messages for each multisig member instead of just the one corresponding
+ * to the local agent.
+ * 
+ * @param agentOobi an agent OOBI including the final "/agent/<agent AID>" suffix
+ * @returns A valid multisig OOBI
+ */
+export function splitMultisigAgentOobi(agentOobi: string): string {
+    return agentOobi.split('/agent/')[0]
+}
+
+export async function exposeMultisigAgentOobi(
+    clientA: SignifyClient,
+    memberAName: string,
+    clientB: SignifyClient,
+    memberBName: string,
+    groupName: string
+): Promise<string> {
+    const [memberA, memberB, groupA, groupB] = await Promise.all([
+        clientA.identifiers().get(memberAName),
+        clientB.identifiers().get(memberBName),
+        clientA.identifiers().get(groupName),
+        clientB.identifiers().get(groupName),
+    ]);
+    const stamp = createTimestamp();
+
+    const opsA = await addEndRoleMultisig(
+        clientA,
+        groupName,
+        memberA,
+        [memberB],
+        groupA,
+        stamp,
+        true
+    );
+    const opsB = await addEndRoleMultisig(
+        clientB,
+        groupName,
+        memberB,
+        [memberA],
+        groupB,
+        stamp
+    );
+
+    await Promise.all([
+        ...opsA.map((op) => waitOperation(clientA, op)),
+        ...opsB.map((op) => waitOperation(clientB, op)),
+    ]);
+
+    const groupOobi = await clientA.oobis().get(groupName, 'agent');
+    return groupOobi.oobis[0].split('/agent/')[0];
 }

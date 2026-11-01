@@ -22,6 +22,8 @@ import {
 import {
     ExchangeOperation,
     CredentialOperation,
+    ExnV1,
+    GroupKeyState,
     GroupOperation,
     DelegationOperation,
     WitnessOperation,
@@ -29,12 +31,19 @@ import {
     HabState,
     RegistryOperation,
 } from '../core/keyState.ts';
+import type { ExchangeResourceV1 } from './exchanging.ts';
 
 import { components } from '../../types/keria-api-schema.ts';
 
 export type CredentialResult = components['schemas']['Credential'];
 export type Registry = components['schemas']['Registry'];
 export type Schema = components['schemas']['Schema'];
+
+type GroupHabState = HabState & { group: GroupKeyState };
+
+function isGroupHab(hab: HabState): hab is GroupHabState {
+    return 'group' in hab;
+}
 
 /** Types of credentials */
 export class CredentialTypes {
@@ -751,9 +760,96 @@ export class Schemas {
 }
 
 /**
- * Ipex
+ * IPEX - Issuance and Presentation Exchange protocol
+ * Handles credential issuance and disclosure negotiation.
  */
 
+// list IPEX routes and make types to clarify IPEX class logic
+const IPEX_JOIN_ROUTES = [
+    '/ipex/apply',
+    '/ipex/offer',
+    '/ipex/agree',
+    '/ipex/grant',
+    '/ipex/admit',
+] as const;
+
+type IpexJoinRoute = (typeof IPEX_JOIN_ROUTES)[number];
+
+function isIpexJoinRoute(route: string): route is IpexJoinRoute {
+    for (const supportedRoute of IPEX_JOIN_ROUTES) {
+        if (route === supportedRoute) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Map IPEX exchange message routes to URL endpoint suffixes with types to clarify IPEX class logic
+type IpexJoinEndpoint = 'apply' | 'offer' | 'agree' | 'grant' | 'admit';
+
+const IPEX_JOIN_ENDPOINTS: Record<IpexJoinRoute, IpexJoinEndpoint> = {
+    '/ipex/apply': 'apply',
+    '/ipex/offer': 'offer',
+    '/ipex/agree': 'agree',
+    '/ipex/grant': 'grant',
+    '/ipex/admit': 'admit',
+};
+
+/**
+ * Look up IPEX URL endpoint suffix based on IPEX route.
+ */
+function ipexJoinEndpoint(route: string): IpexJoinEndpoint {
+    if (!isIpexJoinRoute(route)) {
+        throw new Error(`unsupported embedded IPEX route ${route}`);
+    }
+    return IPEX_JOIN_ENDPOINTS[route];
+}
+
+type IpexJoinPayload = {
+    i: string;
+    [key: string]: unknown;
+};
+
+// The embedded IPEX Exn will have a route and its own attributes
+type EmbeddedIpexExn = ExnV1 & {
+    r: IpexJoinRoute;
+    a: IpexJoinPayload;
+};
+
+type JoinMultisigExn = ExnV1 & {
+    r: '/multisig/exn';
+    a: {
+        gid: string;
+        [key: string]: unknown;
+    };
+    e: {
+        exn: EmbeddedIpexExn;
+        d?: string;
+    };
+};
+
+type JoinMultisigExnExchange = ExchangeResourceV1 & {
+    exn: JoinMultisigExn;
+};
+
+// Tagged tuple for a source key-event seal.
+type SealEvent = [
+    'SealEvent',
+    {
+        i: string; // AID/prefix of the sealed source event's KEL
+        s: string; // sequence number of that source event
+        d: string; // SAID/digest of that source event
+    },
+];
+
+// ensure value is object and not null
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Main IPEX API class supporting all IPEX verbs
+ */
 export class Ipex {
     client: SignifyClient;
     /**
@@ -1007,6 +1103,186 @@ export class Ipex {
             'POST',
             body
         );
+
+        return response.json();
+    }
+
+    private attachmentString(attachment: unknown): string {
+        if (attachment === undefined || attachment === null) {
+            return '';
+        }
+        if (Array.isArray(attachment)) {
+            return attachment.join('');
+        }
+        if (typeof attachment === 'string') {
+            return attachment;
+        }
+        if (attachment instanceof Uint8Array) {
+            return d(attachment);
+        }
+        return String(attachment);
+    }
+
+    private proposalAttachment(exchange: ExchangeResourceV1): string {
+        const pathed = exchange.pathed;
+        if (!isRecord(pathed)) {
+            return '';
+        }
+        return this.attachmentString(pathed['exn']);
+    }
+
+    private groupHab(hab: HabState): GroupHabState {
+        if (!isGroupHab(hab)) {
+            throw new Error('identifier is not a multisig group habitat');
+        }
+        return hab;
+    }
+
+    private validateJoinExchange(
+        groupHab: GroupHabState,
+        exchange: ExchangeResourceV1
+    ): JoinMultisigExnExchange {
+        const outer = exchange.exn;
+        if (!isRecord(outer)) {
+            throw new Error('exchange response missing exn');
+        }
+        const outerRoute = outer['r'];
+        if (outerRoute !== '/multisig/exn') {
+            throw new Error(`expected /multisig/exn, got ${outerRoute}`);
+        }
+        const outerAttrs = outer['a'];
+        const gid = isRecord(outerAttrs) ? outerAttrs['gid'] : undefined;
+        if (gid !== groupHab.prefix) {
+            throw new Error(
+                `multisig proposal gid ${gid} does not match group ${groupHab.prefix}`
+            );
+        }
+
+        const outerEmbeds = outer['e'];
+        const embedded = isRecord(outerEmbeds)
+            ? outerEmbeds['exn']
+            : undefined;
+        if (!isRecord(embedded)) {
+            throw new Error('multisig proposal missing embedded exn');
+        }
+        const embeddedSender = embedded['i'];
+        if (embeddedSender !== groupHab.prefix) {
+            throw new Error(
+                `embedded IPEX sender ${embeddedSender} does not match group ${groupHab.prefix}`
+            );
+        }
+
+        const embeddedAttrs = embedded['a'];
+        const ipexRecipient = isRecord(embeddedAttrs)
+            ? embeddedAttrs['i']
+            : undefined;
+        if (typeof ipexRecipient !== 'string' || ipexRecipient === '') {
+            throw new Error('embedded IPEX message missing recipient a.i');
+        }
+
+        const embeddedRoute = embedded['r'];
+        if (typeof embeddedRoute !== 'string') {
+            throw new Error(
+                `unsupported embedded IPEX route ${String(embeddedRoute)}`
+            );
+        }
+        ipexJoinEndpoint(embeddedRoute);
+        return exchange as JoinMultisigExnExchange;
+    }
+
+    private async signJoinedIpex(
+        groupHab: GroupHabState,
+        serder: Serder
+    ): Promise<string> {
+        const keeper = this.client.manager!.get(groupHab);
+        const sigs = await keeper.sign(b(serder.raw));
+        const sigers = sigs.map((sig: string) => new Siger({ qb64: sig }));
+        const seal: SealEvent = [
+            'SealEvent',
+            {
+                i: groupHab.prefix,
+                s: groupHab.state.ee.s,
+                d: groupHab.state.ee.d,
+            },
+        ];
+        const ims = d(messagize(serder, sigers, seal));
+        return ims.substring(serder.size);
+    }
+
+    /**
+     * Joins an IPEX event sent by an initiator in a `/multisig/exn` message.
+     * Assumes the group Hab has only one local member.
+     *
+     * @param name human-friendly alias of AID
+     * @param said SAID of the `/multisig/exn` message containing the IPEX operation to join.
+     * @returns response from POSTing the `/multisig/exn` message to KERIA
+     */
+    async join(name: string, said: string): Promise<ExchangeOperation> {
+        const groupHab = this.groupHab(
+            await this.client.identifiers().get(name)
+        );
+        const localMember = groupHab.group.mhab;
+
+        // the /multisig/exn message from the initiator
+        const exchange = await this.client.exchanges().get(said);
+        const joinExchange = this.validateJoinExchange(groupHab, exchange);
+        const embedded = joinExchange.exn.e.exn;
+        const endpoint = ipexJoinEndpoint(embedded.r);
+        const ipexRecipient = embedded.a.i;
+
+        const members = await this.client.identifiers().members(name);
+        const peerRecipients = members.signing
+            .map((member) => member.aid)
+            .filter((aid) => aid !== localMember.prefix);
+        if (peerRecipients.length === 0) {
+            throw new Error(
+                'no peer signing members available for multisig IPEX join'
+            );
+        }
+
+        const serder = new Serder(embedded as unknown as Dict<unknown>);
+        const localAtc = await this.signJoinedIpex(groupHab, serder);
+        const proposalAtc = this.proposalAttachment(exchange);
+        const [outer, outerSigs, outerAtc] = await this.client
+            .exchanges()
+            .createExchangeMessage(
+                localMember,
+                '/multisig/exn',
+                { gid: groupHab.prefix },
+                { exn: [serder, localAtc + proposalAtc] },
+                ipexRecipient
+            );
+
+        const response = await this.client.fetch(
+            `/identifiers/${name}/ipex/${endpoint}`,
+            'POST',
+            {
+                exn: outer.sad,
+                sigs: outerSigs,
+                atc: outerAtc,
+                rec: [ipexRecipient],
+            }
+        );
+
+        const [peerOuter, peerSigs, peerAtc] = await this.client
+            .exchanges()
+            .createExchangeMessage(
+                localMember,
+                '/multisig/exn',
+                { gid: groupHab.prefix },
+                { exn: [serder, localAtc + proposalAtc] },
+                peerRecipients[0]
+            );
+        await this.client
+            .exchanges()
+            .sendFromEvents(
+                localMember.name,
+                'multisig',
+                peerOuter,
+                peerSigs,
+                peerAtc,
+                peerRecipients
+            );
 
         return response.json();
     }
