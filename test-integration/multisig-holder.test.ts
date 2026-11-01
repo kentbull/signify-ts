@@ -435,10 +435,10 @@ test('multisig', async function run() {
     await waitOperation(client2, admitResult2.op);
     await assertNoNotifications(client1, '/multisig/exn');
     await assertNoNotifications(client2, '/multisig/exn');
-    await waitAndMarkNotification(client1, '/exn/ipex/admit', {
+    await assertNoNotifications(client1, '/exn/ipex/admit', {
         said: admitResult1.admitSaid,
     });
-    await waitAndMarkNotification(client2, '/exn/ipex/admit', {
+    await assertNoNotifications(client2, '/exn/ipex/admit', {
         said: admitResult1.admitSaid,
     });
     await waitAndMarkNotification(client3, '/exn/ipex/admit', {
@@ -521,7 +521,7 @@ async function issueCredential(
             .ipex()
             .submitGrant(name, grant, gsigs, end, [data.a.i]);
         await waitOperation(client, op);
-        await waitAndMarkNotification(client, '/exn/ipex/grant', {
+        await assertNoNotifications(client, '/exn/ipex/grant', {
             said: grant.said,
         });
         return grant.said;

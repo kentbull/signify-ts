@@ -4,6 +4,7 @@ import { resolveEnvironment } from './utils/resolve-env.ts';
 import {
     Aid,
     assertNotifications,
+    assertNoNotifications,
     assertOperations,
     createAid,
     getOrCreateClients,
@@ -615,7 +616,11 @@ async function getOrCreateRegistry(
             .registries()
             .create({ name: aid.name, registryName: registryName });
         await waitOperation(client, await regResult.op());
-        registries = await client.registries().list(aid.name);
+        registries = await retry(async () => {
+            const values = await client.registries().list(aid.name);
+            assert.equal(values.length, 1);
+            return values;
+        }, CRED_RETRY_DEFAULTS);
     }
     return registries[0];
 }
@@ -641,7 +646,7 @@ async function sendGrantMessage(
         .submitGrant(senderAid.name, grant, gsigs, gend, [recipientAid.prefix]);
     await waitOperation(senderClient, op);
 
-    await waitAndMarkNotification(senderClient, '/exn/ipex/grant', {
+    await assertNoNotifications(senderClient, '/exn/ipex/grant', {
         said: grant.said,
     });
 
@@ -683,7 +688,7 @@ async function sendAdmitMessage(
         .submitAdmit(senderAid.name, admit, sigs, aend, [recipientAid.prefix]);
     await waitOperation(senderClient, op);
 
-    await waitAndMarkNotification(senderClient, '/exn/ipex/admit', {
+    await assertNoNotifications(senderClient, '/exn/ipex/admit', {
         said: admit.said,
     });
 

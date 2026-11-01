@@ -16,7 +16,6 @@ import {
     getOrCreateContact,
     markAndRemoveNotification,
     resolveOobi,
-    waitAndMarkNotification,
     waitForNotifications,
     waitOperation,
 } from './utils/test-util.ts';
@@ -273,7 +272,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(issuerClient, op);
-        await waitAndMarkNotification(issuerClient, '/exn/ipex/grant', {
+        await assertNoNotifications(issuerClient, '/exn/ipex/grant', {
             said: qviGrantSaid,
         });
     });
@@ -313,7 +312,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             .ipex()
             .submitAdmit(holderAid.name, admit, sigs, aend, [issuerAid.prefix]);
         await waitOperation(holderClient, op);
-        await waitAndMarkNotification(holderClient, '/exn/ipex/admit', {
+        await assertNoNotifications(holderClient, '/exn/ipex/admit', {
             said: qviAdmitSaid,
         });
 
@@ -363,7 +362,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             .ipex()
             .submitApply(verifierAid.name, apply, sigs, [holderAid.prefix]);
         await waitOperation(verifierClient, op);
-        await waitAndMarkNotification(verifierClient, '/exn/ipex/apply', {
+        await assertNoNotifications(verifierClient, '/exn/ipex/apply', {
             said: applySaid,
         });
     });
@@ -410,7 +409,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 verifierAid.prefix,
             ]);
         await waitOperation(holderClient, op);
-        await waitAndMarkNotification(holderClient, '/exn/ipex/offer', {
+        await assertNoNotifications(holderClient, '/exn/ipex/offer', {
             said: offerSaid,
         });
     });
@@ -447,7 +446,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             .ipex()
             .submitAgree(verifierAid.name, agree, sigs, [holderAid.prefix]);
         await waitOperation(verifierClient, op);
-        await waitAndMarkNotification(verifierClient, '/exn/ipex/agree', {
+        await assertNoNotifications(verifierClient, '/exn/ipex/agree', {
             said: agreeSaid,
         });
     });
@@ -493,7 +492,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 verifierAid.prefix,
             ]);
         await waitOperation(holderClient, op);
-        await waitAndMarkNotification(holderClient, '/exn/ipex/grant', {
+        await assertNoNotifications(holderClient, '/exn/ipex/grant', {
             said: presentationGrantSaid,
         });
     });
@@ -528,7 +527,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(verifierClient, op);
-        await waitAndMarkNotification(verifierClient, '/exn/ipex/admit', {
+        await assertNoNotifications(verifierClient, '/exn/ipex/admit', {
             said: presentationAdmitSaid,
         });
 
@@ -639,7 +638,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 legalEntityAid.prefix,
             ]);
         await waitOperation(holderClient, op);
-        await waitAndMarkNotification(holderClient, '/exn/ipex/grant', {
+        await assertNoNotifications(holderClient, '/exn/ipex/grant', {
             said: leGrantSaid,
         });
     });
@@ -669,7 +668,7 @@ test('single signature credentials', { timeout: 90000 }, async () => {
                 holderAid.prefix,
             ]);
         await waitOperation(legalEntityClient, op);
-        await waitAndMarkNotification(legalEntityClient, '/exn/ipex/admit', {
+        await assertNoNotifications(legalEntityClient, '/exn/ipex/admit', {
             said: leAdmitSaid,
         });
 
@@ -722,11 +721,12 @@ test('single signature credentials', { timeout: 90000 }, async () => {
             .revoke(issuerAid.name, qviCredentialId);
 
         await waitOperation(issuerClient, revokeOperation.op);
-        const issuerCredential = await issuerClient
-            .credentials()
-            .get(qviCredentialId);
-
-        assert.equal(issuerCredential.status.s, '1');
+        await retry(async () => {
+            const issuerCredential = await issuerClient
+                .credentials()
+                .get(qviCredentialId);
+            assert.equal(issuerCredential.status.s, '1');
+        });
     });
 
     await step('Holder deletes LE credential', async () => {

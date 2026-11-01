@@ -7,6 +7,7 @@ import signify, {
     randomNonce,
     Salter,
     HabState,
+    SignifyClient,
 } from 'signify-ts';
 import { resolveEnvironment } from './utils/resolve-env.ts';
 import {
@@ -32,6 +33,7 @@ import {
     grantMultisig,
     issueCredentialMultisig,
 } from './utils/multisig-utils.ts';
+import { retry } from './utils/retry.ts';
 
 const { vleiServerUrl, witnessIds } = resolveEnvironment();
 
@@ -43,6 +45,19 @@ const vLEIServerHostUrl = `${vleiServerUrl}/oobi`;
 const QVI_SCHEMA_URL = `${vLEIServerHostUrl}/${QVI_SCHEMA_SAID}`;
 const LE_SCHEMA_URL = `${vLEIServerHostUrl}/${LE_SCHEMA_SAID}`;
 const ECR_SCHEMA_URL = `${vLEIServerHostUrl}/${ECR_SCHEMA_SAID}`;
+
+async function waitForRegistries(clients: SignifyClient[], name: string) {
+    return retry(async () => {
+        const registries = await Promise.all(
+            clients.map((client) => client.registries().list(name))
+        );
+        assert(
+            registries.every((registry) => registry.length > 0),
+            `Registry ${name} has not converged on every member`
+        );
+        return registries;
+    });
+}
 
 const qviData = {
     LEI: '254900OPPU84GM83MG36',
@@ -508,10 +523,10 @@ test('multisig-vlei-issuance', async function run() {
         ]);
         await assertNoNotifications(clientGAR1, '/multisig/vcp');
 
-        [gedaRegistrybyGAR1, gedaRegistrybyGAR2] = await Promise.all([
-            clientGAR1.registries().list(aidGEDA.name),
-            clientGAR2.registries().list(aidGEDA.name),
-        ]);
+        [gedaRegistrybyGAR1, gedaRegistrybyGAR2] = await waitForRegistries(
+            [clientGAR1, clientGAR2],
+            aidGEDA.name
+        );
     }
     assert.equal(gedaRegistrybyGAR1[0].regk, gedaRegistrybyGAR2[0].regk);
     assert.equal(gedaRegistrybyGAR1[0].name, gedaRegistrybyGAR2[0].name);
@@ -599,10 +614,10 @@ test('multisig-vlei-issuance', async function run() {
             grantTime
         );
         assert.equal(qviGrantSaid1, qviGrantSaid2);
-        await waitAndMarkNotification(clientGAR1, '/exn/ipex/grant', {
+        await assertNoNotifications(clientGAR1, '/exn/ipex/grant', {
             said: qviGrantSaid1,
         });
-        await waitAndMarkNotification(clientGAR2, '/exn/ipex/grant', {
+        await assertNoNotifications(clientGAR2, '/exn/ipex/grant', {
             said: qviGrantSaid2,
         });
         await assertNoNotifications(clientGAR1, '/multisig/exn');
@@ -668,13 +683,13 @@ test('multisig-vlei-issuance', async function run() {
         await assertNoNotifications(clientQAR1, '/multisig/exn');
         await assertNoNotifications(clientQAR2, '/multisig/exn');
         await assertNoNotifications(clientQAR3, '/multisig/exn');
-        await waitAndMarkNotification(clientQAR1, '/exn/ipex/admit', {
+        await assertNoNotifications(clientQAR1, '/exn/ipex/admit', {
             said: qviAdmitSaid1,
         });
-        await waitAndMarkNotification(clientQAR2, '/exn/ipex/admit', {
+        await assertNoNotifications(clientQAR2, '/exn/ipex/admit', {
             said: qviAdmitSaid1,
         });
-        await waitAndMarkNotification(clientQAR3, '/exn/ipex/admit', {
+        await assertNoNotifications(clientQAR3, '/exn/ipex/admit', {
             said: qviAdmitSaid1,
         });
 
@@ -864,11 +879,10 @@ test('multisig-vlei-issuance', async function run() {
         await assertNoNotifications(clientQAR1, '/multisig/vcp');
 
         [qviRegistrybyQAR1, qviRegistrybyQAR2, qviRegistrybyQAR3] =
-            await Promise.all([
-                clientQAR1.registries().list(aidQVI.name),
-                clientQAR2.registries().list(aidQVI.name),
-                clientQAR3.registries().list(aidQVI.name),
-            ]);
+            await waitForRegistries(
+                [clientQAR1, clientQAR2, clientQAR3],
+                aidQVI.name
+            );
     }
     assert.equal(qviRegistrybyQAR1[0].regk, qviRegistrybyQAR2[0].regk);
     assert.equal(qviRegistrybyQAR1[0].regk, qviRegistrybyQAR3[0].regk);
@@ -998,13 +1012,13 @@ test('multisig-vlei-issuance', async function run() {
         );
         assert.equal(leGrantSaid1, leGrantSaid2);
         assert.equal(leGrantSaid1, leGrantSaid3);
-        await waitAndMarkNotification(clientQAR1, '/exn/ipex/grant', {
+        await assertNoNotifications(clientQAR1, '/exn/ipex/grant', {
             said: leGrantSaid1,
         });
-        await waitAndMarkNotification(clientQAR2, '/exn/ipex/grant', {
+        await assertNoNotifications(clientQAR2, '/exn/ipex/grant', {
             said: leGrantSaid1,
         });
-        await waitAndMarkNotification(clientQAR3, '/exn/ipex/grant', {
+        await assertNoNotifications(clientQAR3, '/exn/ipex/grant', {
             said: leGrantSaid1,
         });
         await assertNoNotifications(clientQAR1, '/multisig/exn');
@@ -1072,13 +1086,13 @@ test('multisig-vlei-issuance', async function run() {
         await assertNoNotifications(clientLAR1, '/multisig/exn');
         await assertNoNotifications(clientLAR2, '/multisig/exn');
         await assertNoNotifications(clientLAR3, '/multisig/exn');
-        await waitAndMarkNotification(clientLAR1, '/exn/ipex/admit', {
+        await assertNoNotifications(clientLAR1, '/exn/ipex/admit', {
             said: leAdmitSaid1,
         });
-        await waitAndMarkNotification(clientLAR2, '/exn/ipex/admit', {
+        await assertNoNotifications(clientLAR2, '/exn/ipex/admit', {
             said: leAdmitSaid1,
         });
-        await waitAndMarkNotification(clientLAR3, '/exn/ipex/admit', {
+        await assertNoNotifications(clientLAR3, '/exn/ipex/admit', {
             said: leAdmitSaid1,
         });
 
@@ -1138,11 +1152,10 @@ test('multisig-vlei-issuance', async function run() {
         await assertNoNotifications(clientLAR1, '/multisig/vcp');
 
         [leRegistrybyLAR1, leRegistrybyLAR2, leRegistrybyLAR3] =
-            await Promise.all([
-                clientLAR1.registries().list(aidLE.name),
-                clientLAR2.registries().list(aidLE.name),
-                clientLAR3.registries().list(aidLE.name),
-            ]);
+            await waitForRegistries(
+                [clientLAR1, clientLAR2, clientLAR3],
+                aidLE.name
+            );
     }
     assert.equal(leRegistrybyLAR1[0].regk, leRegistrybyLAR2[0].regk);
     assert.equal(leRegistrybyLAR1[0].regk, leRegistrybyLAR3[0].regk);
@@ -1276,13 +1289,13 @@ test('multisig-vlei-issuance', async function run() {
         );
         assert.equal(ecrGrantSaid1, ecrGrantSaid2);
         assert.equal(ecrGrantSaid1, ecrGrantSaid3);
-        await waitAndMarkNotification(clientLAR1, '/exn/ipex/grant', {
+        await assertNoNotifications(clientLAR1, '/exn/ipex/grant', {
             said: ecrGrantSaid1,
         });
-        await waitAndMarkNotification(clientLAR2, '/exn/ipex/grant', {
+        await assertNoNotifications(clientLAR2, '/exn/ipex/grant', {
             said: ecrGrantSaid1,
         });
-        await waitAndMarkNotification(clientLAR3, '/exn/ipex/grant', {
+        await assertNoNotifications(clientLAR3, '/exn/ipex/grant', {
             said: ecrGrantSaid1,
         });
         await assertNoNotifications(clientLAR1, '/multisig/exn');
@@ -1316,7 +1329,7 @@ test('multisig-vlei-issuance', async function run() {
             aidECR.name,
             aidLE
         );
-        await waitAndMarkNotification(clientECR, '/exn/ipex/admit', {
+        await assertNoNotifications(clientECR, '/exn/ipex/admit', {
             said: ecrAdmitSaid,
         });
         await waitAndMarkNotification(clientLAR1, '/exn/ipex/admit', {

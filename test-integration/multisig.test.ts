@@ -1125,13 +1125,13 @@ test('multisig', async function run() {
 
     assert.equal(grant.said, grant2.said);
     assert.equal(grant.said, grant3.said);
-    await waitAndMarkNotification(client1, '/exn/ipex/grant', {
+    await assertNoNotifications(client1, '/exn/ipex/grant', {
         said: grant.said,
     });
-    await waitAndMarkNotification(client2, '/exn/ipex/grant', {
+    await assertNoNotifications(client2, '/exn/ipex/grant', {
         said: grant.said,
     });
-    await waitAndMarkNotification(client3, '/exn/ipex/grant', {
+    await assertNoNotifications(client3, '/exn/ipex/grant', {
         said: grant.said,
     });
 
@@ -1156,7 +1156,7 @@ test('multisig', async function run() {
     const exOp4 = await client4
         .ipex()
         .submitAdmit('holder', admit, asigs, aend, [m['prefix']]);
-    await waitAndMarkNotification(client4, '/exn/ipex/admit', {
+    await assertNoNotifications(client4, '/exn/ipex/admit', {
         said: admit.said,
     });
 
