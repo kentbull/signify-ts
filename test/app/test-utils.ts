@@ -282,51 +282,54 @@ export function createMockFetch(): Mock<typeof globalThis.fetch> {
         } else if (url.toString() === boot_url + '/boot') {
             return Response.json('', { status: 202 });
         } else {
-            const headers = new Headers();
-            let signed_headers = new Headers();
-
-            headers.set(
-                'Signify-Resource',
-                'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
-            );
-            headers.set(
-                HEADER_SIG_TIME,
-                new Date().toISOString().replace('Z', '000+00:00')
-            );
-            headers.set('Content-Type', 'application/json');
-
-            const salter = new Salter({ qb64: '0AAwMTIzNDU2Nzg5YWJjZGVm' });
-            const signer = salter.signer(
-                'A',
-                true,
-                'agentagent-ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose00',
-                Tier.low
-            );
-
-            const authn = new Authenticater(signer!, signer!.verfer);
-
-            signed_headers = authn.sign(
-                headers,
-                method,
-
-                url.pathname.split('?')[0]
-            );
-
             if (url.pathname.startsWith('/credentials')) {
-                return Response.json(mockCredential, {
-                    status: 200,
-                    headers: signed_headers,
-                });
+                return createSignedMockResponse(
+                    mockCredential,
+                    method,
+                    url.pathname,
+                    200
+                );
             }
 
-            return Response.json(mockGetAID, {
-                status: 202,
-                headers: signed_headers,
-            });
+            return createSignedMockResponse(mockGetAID, method, url.pathname);
         }
     });
 
     return spy as Mock<typeof fetch>;
+}
+
+export function createSignedMockResponse(
+    body: unknown,
+    method: string,
+    path: string,
+    status = 202
+): Response {
+    const headers = new Headers();
+    headers.set(
+        'Signify-Resource',
+        'EEXekkGu9IAzav6pZVJhkLnjtjM5v3AcyA-pdKUcaGei'
+    );
+    headers.set(
+        HEADER_SIG_TIME,
+        new Date().toISOString().replace('Z', '000+00:00')
+    );
+    headers.set('Content-Type', 'application/json');
+
+    const salter = new Salter({ qb64: '0AAwMTIzNDU2Nzg5YWJjZGVm' });
+    const signer = salter.signer(
+        'A',
+        true,
+        'agentagent-ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose00',
+        Tier.low
+    );
+
+    const authn = new Authenticater(signer!, signer!.verfer);
+    const signedHeaders = authn.sign(headers, method, path.split('?')[0]);
+
+    return Response.json(body, {
+        status,
+        headers: signedHeaders,
+    });
 }
 
 export const mockCredential = {

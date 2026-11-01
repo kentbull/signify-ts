@@ -1,13 +1,18 @@
-import { assert, describe, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { SignifyClient } from '../../src/keri/app/clienting.ts';
 
 import { Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
 import {
+    Algos,
     d,
+    exchange as createExchange,
+    HabState,
+    Ipex,
     Protocols,
     Ilks,
     interact,
+    randomPasscode,
     Saider,
     Serder,
     serializeACDCAttachment,
@@ -15,12 +20,307 @@ import {
     Serials,
     versify,
 } from '../../src/index.ts';
-import { createMockFetch, mockCredential } from './test-utils.ts';
+import {
+    createMockFetch,
+    createMockIdentifierState,
+    createSignedMockResponse,
+    mockConnect,
+    mockCredential,
+} from './test-utils.ts';
+import type { ExchangeResourceV1, ExnV1 } from '../../src/index.ts';
 
 const fetchMock = createMockFetch();
 
 const url = 'http://127.0.0.1:3901';
 const boot_url = 'http://127.0.0.1:3903';
+
+const JOIN_BRAN = '0123456789abcdefghijk';
+const JOIN_GROUP_NAME = 'sender-group';
+const JOIN_LOCAL_MEMBER_NAME = 'local-member';
+const JOIN_PEER_MEMBER_NAME = 'peer-member';
+const JOIN_RECIPIENT_PRE = 'EP10ooRj0DJF0HWZePEYMLPl-arMV-MAoTKK-o3DXbgX';
+const JOIN_DATE = '2023-08-23T15:16:07.553000+00:00';
+const JOIN_PROPOSAL_ATC = 'PROPOSAL-ATC';
+
+type SupportedJoinIpexRoute =
+    | '/ipex/apply'
+    | '/ipex/offer'
+    | '/ipex/agree'
+    | '/ipex/grant'
+    | '/ipex/admit';
+type JoinIpexRoute = SupportedJoinIpexRoute | '/ipex/spurn';
+
+type JoinMultisigExn = ExnV1 & {
+    r: '/multisig/exn';
+    a: {
+        gid: string;
+        [key: string]: unknown;
+    };
+    e: {
+        exn: ExnV1;
+        d?: string;
+    };
+};
+
+type JoinExchangeResource = ExchangeResourceV1 & {
+    exn: JoinMultisigExn;
+    pathed: {
+        exn: string;
+        [key: string]: unknown;
+    };
+};
+
+interface JoinMembers {
+    signing: { aid: string }[];
+    rotation: { aid: string }[];
+}
+
+interface JoinHabitats {
+    group: HabState;
+    member: HabState;
+    peer: HabState;
+}
+
+interface JoinPost {
+    path: string;
+    method: string;
+    body: unknown;
+}
+
+interface JoinHarnessOptions {
+    route?: SupportedJoinIpexRoute;
+    proposalAtc?: string;
+    exchange?: (
+        habitats: JoinHabitats,
+        inner: Serder
+    ) => ExchangeResourceV1;
+    members?: (habitats: JoinHabitats) => JoinMembers;
+}
+
+interface IpexJoinSubmitBody {
+    exn: {
+        r: string;
+        a: { gid: string };
+        e: { exn: { d: string; r: string; i: string } };
+    };
+    sigs: string[];
+    atc: string;
+    rec: string[];
+}
+
+interface IpexJoinPeerBody {
+    exn: { r: string; e: { exn: { d: string } } };
+    sigs: string[];
+    atc: string;
+    rec: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function assertRecord(
+    value: unknown,
+    label: string
+): asserts value is Record<string, unknown> {
+    assert(isRecord(value), `${label} must be an object`);
+}
+
+function assertString(
+    value: unknown,
+    label: string
+): asserts value is string {
+    assert.equal(typeof value, 'string', `${label} must be a string`);
+}
+
+function assertStringArray(
+    value: unknown,
+    label: string
+): asserts value is string[] {
+    assert(
+        Array.isArray(value) &&
+            value.every((entry) => typeof entry === 'string'),
+        `${label} must be a string array`
+    );
+}
+
+function ipexJoinSubmitBody(body: unknown): IpexJoinSubmitBody {
+    assertRecord(body, 'submit body');
+    const exn = body['exn'];
+    assertRecord(exn, 'submit body exn');
+    const attrs = exn['a'];
+    assertRecord(attrs, 'submit body exn attrs');
+    assertString(attrs['gid'], 'submit body group id');
+    const embeds = exn['e'];
+    assertRecord(embeds, 'submit body embeds');
+    const embedded = embeds['exn'];
+    assertRecord(embedded, 'submit body embedded exn');
+    assertString(embedded['d'], 'submit body embedded said');
+    assertString(embedded['r'], 'submit body embedded route');
+    assertString(embedded['i'], 'submit body embedded sender');
+    assertStringArray(body['sigs'], 'submit body sigs');
+    assertString(body['atc'], 'submit body atc');
+    assertStringArray(body['rec'], 'submit body recipients');
+    return body as unknown as IpexJoinSubmitBody;
+}
+
+function ipexJoinPeerBody(body: unknown): IpexJoinPeerBody {
+    assertRecord(body, 'peer body');
+    const exn = body['exn'];
+    assertRecord(exn, 'peer body exn');
+    const embeds = exn['e'];
+    assertRecord(embeds, 'peer body embeds');
+    const embedded = embeds['exn'];
+    assertRecord(embedded, 'peer body embedded exn');
+    assertString(embedded['d'], 'peer body embedded said');
+    assertStringArray(body['sigs'], 'peer body sigs');
+    assertString(body['atc'], 'peer body atc');
+    assertStringArray(body['rec'], 'peer body recipients');
+    return body as unknown as IpexJoinPeerBody;
+}
+
+function joinIpex(
+    route: JoinIpexRoute,
+    groupPrefix: string,
+    recipient = JOIN_RECIPIENT_PRE
+): Serder {
+    const payload =
+        route === '/ipex/apply'
+            ? { m: '', s: 'schema-said', a: {} }
+            : { m: '' };
+    return createExchange(route, payload, groupPrefix, recipient, JOIN_DATE)[0];
+}
+
+function joinExchange(
+    inner: Serder,
+    groupPrefix: string,
+    peerPrefix: string,
+    localPrefix: string,
+    proposalAtc: string = JOIN_PROPOSAL_ATC
+): JoinExchangeResource {
+    const [outer] = createExchange(
+        '/multisig/exn',
+        { gid: groupPrefix },
+        peerPrefix,
+        localPrefix,
+        JOIN_DATE,
+        undefined,
+        undefined,
+        { exn: [inner, proposalAtc] }
+    );
+    return {
+        exn: outer.sad as unknown as JoinExchangeResource['exn'],
+        pathed: { exn: proposalAtc },
+    };
+}
+
+function fetchUrl(input: Parameters<typeof fetch>[0]): URL {
+    if (input instanceof URL) {
+        return input;
+    }
+    if (typeof input === 'string') {
+        return new URL(input);
+    }
+    return new URL(input.url);
+}
+
+function fetchMethod(
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1]
+): string {
+    if (input instanceof Request) {
+        return input.method;
+    }
+    return init?.method ?? 'GET';
+}
+
+function fetchBody(init?: Parameters<typeof fetch>[1]): unknown {
+    const body = init?.body;
+    if (typeof body === 'string') {
+        return JSON.parse(body);
+    }
+    return body;
+}
+
+async function createJoinHarness(options: JoinHarnessOptions = {}) {
+    const member = await createMockIdentifierState(
+        JOIN_LOCAL_MEMBER_NAME,
+        JOIN_BRAN
+    );
+    const peer = await createMockIdentifierState(
+        JOIN_PEER_MEMBER_NAME,
+        randomPasscode()
+    );
+    const group = await createMockIdentifierState(JOIN_GROUP_NAME, JOIN_BRAN, {
+        algo: Algos.group,
+        mhab: member,
+        isith: '1',
+        nsith: '1',
+        states: [member.state, peer.state],
+        rstates: [member.state, peer.state],
+    });
+    const habitats = { group, member, peer };
+    const inner = joinIpex(options.route ?? '/ipex/apply', group.prefix);
+    const storedExchange =
+        options.exchange?.(habitats, inner) ??
+        joinExchange(
+            inner,
+            group.prefix,
+            peer.prefix,
+            member.prefix,
+            options.proposalAtc
+        );
+    const members = options.members?.(habitats) ?? {
+        signing: [{ aid: member.prefix }, { aid: peer.prefix }],
+        rotation: [{ aid: member.prefix }, { aid: peer.prefix }],
+    };
+    const posts: JoinPost[] = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+        const requestUrl = fetchUrl(input);
+        const method = fetchMethod(input, init);
+        const path = requestUrl.pathname;
+
+        if (path.startsWith('/agent')) {
+            return Response.json(mockConnect, { status: 202 });
+        }
+        if (requestUrl.toString() === boot_url + '/boot') {
+            return Response.json('', { status: 202 });
+        }
+        if (method === 'GET' && path === `/identifiers/${JOIN_GROUP_NAME}`) {
+            return createSignedMockResponse(group, method, path);
+        }
+        if (
+            method === 'GET' &&
+            path === `/identifiers/${JOIN_GROUP_NAME}/members`
+        ) {
+            return createSignedMockResponse(members, method, path);
+        }
+        if (method === 'GET' && path === '/exchanges/outer-said') {
+            return createSignedMockResponse(storedExchange, method, path);
+        }
+        if (
+            method === 'POST' &&
+            (path.startsWith(`/identifiers/${JOIN_GROUP_NAME}/ipex/`) ||
+                path === `/identifiers/${JOIN_LOCAL_MEMBER_NAME}/exchanges`)
+        ) {
+            posts.push({ path, method, body: fetchBody(init) });
+            return createSignedMockResponse(
+                { name: 'exchange.join', done: false, metadata: {} },
+                method,
+                path
+            );
+        }
+
+        throw new Error(`unexpected fetch ${method} ${path}`);
+    });
+
+    const client = new SignifyClient(url, JOIN_BRAN, Tier.low, boot_url);
+    await client.boot();
+    await client.connect();
+
+    return { client, group, member, peer, inner, posts };
+}
 
 describe('Credentialing', () => {
     it('Credentials', async () => {
@@ -675,5 +975,196 @@ describe('Ipex', () => {
             lastCall[0],
             'http://127.0.0.1:3901/identifiers/multisig/ipex/offer'
         );
+    });
+
+    it('IPEX join posts a multisig apply approval with original proposal attachment', async () => {
+        await libsodium.ready;
+        const { client, group, member, peer, inner, posts } =
+            await createJoinHarness();
+        const op = await new Ipex(client).join(JOIN_GROUP_NAME, 'outer-said');
+
+        assert.equal(op.name, 'exchange.join');
+        assert.equal(posts.length, 2);
+        const post = posts[0]!;
+        assert.equal(post.path, '/identifiers/sender-group/ipex/apply');
+        assert.equal(post.method, 'POST');
+
+        const body = ipexJoinSubmitBody(post.body);
+        assert.equal(body.exn.r, '/multisig/exn');
+        assert.equal(body.exn.a.gid, group.prefix);
+        assert.equal(body.exn.e.exn.d, inner.sad.d);
+        assert.equal(body.exn.e.exn.r, '/ipex/apply');
+        assert.equal(body.exn.e.exn.i, group.prefix);
+        assert.deepStrictEqual(body.rec, [JOIN_RECIPIENT_PRE]);
+        assert.ok(body.atc.includes(JOIN_PROPOSAL_ATC));
+        assert.ok(body.sigs.length > 0);
+        const peerPost = posts[1]!;
+        assert.equal(
+            peerPost.path,
+            `/identifiers/${JOIN_LOCAL_MEMBER_NAME}/exchanges`
+        );
+        const peerBody = ipexJoinPeerBody(peerPost.body);
+        assert.deepStrictEqual(peerBody.rec, [peer.prefix]);
+        assert.equal(peerBody.exn.r, '/multisig/exn');
+        assert.equal(peerBody.exn.e.exn.d, inner.sad.d);
+        assert.ok(peerBody.atc.includes(JOIN_PROPOSAL_ATC));
+        assert.ok(peerBody.sigs.length > 0);
+        assert.notEqual(peer.prefix, member.prefix);
+    });
+
+    it('IPEX join dispatches supported embedded IPEX routes', async () => {
+        await libsodium.ready;
+        const cases: Array<[SupportedJoinIpexRoute, string]> = [
+            ['/ipex/apply', 'apply'],
+            ['/ipex/offer', 'offer'],
+            ['/ipex/agree', 'agree'],
+            ['/ipex/grant', 'grant'],
+            ['/ipex/admit', 'admit'],
+        ];
+
+        for (const [route, endpoint] of cases) {
+            const { client, posts } = await createJoinHarness({ route });
+            await new Ipex(client).join(JOIN_GROUP_NAME, 'outer-said');
+            assert.equal(
+                posts[0]!.path,
+                `/identifiers/sender-group/ipex/${endpoint}`
+            );
+        }
+    }, 30000);
+
+    it(
+        'IPEX join rejects invalid multisig IPEX proposals',
+        async () => {
+            await libsodium.ready;
+            const invalid: Array<
+                [
+                    (
+                        habitats: JoinHabitats,
+                        inner: Serder
+                    ) => ExchangeResourceV1,
+                    RegExp,
+                ]
+            > = [
+                [
+                    (habitats: JoinHabitats, inner: Serder) => {
+                        const base = joinExchange(
+                            inner,
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        );
+                        return {
+                            ...base,
+                            exn: { ...base.exn, r: '/ipex/apply' },
+                        };
+                    },
+                    /expected \/multisig\/exn/,
+                ],
+                [
+                    (habitats: JoinHabitats, inner: Serder) => {
+                        const base = joinExchange(
+                            inner,
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        );
+                        return {
+                            ...base,
+                            exn: {
+                                ...base.exn,
+                                a: { gid: habitats.peer.prefix },
+                            },
+                        };
+                    },
+                    /does not match group/,
+                ],
+                [
+                    (habitats: JoinHabitats, inner: Serder) => {
+                        const base = joinExchange(
+                            inner,
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        );
+                        return {
+                            ...base,
+                            exn: {
+                                ...base.exn,
+                                e: {},
+                            },
+                        };
+                    },
+                    /missing embedded exn/,
+                ],
+                [
+                    (habitats: JoinHabitats) =>
+                        joinExchange(
+                            createExchange(
+                                '/ipex/apply',
+                                { m: '', s: 'schema-said', a: {} },
+                                habitats.peer.prefix,
+                                JOIN_RECIPIENT_PRE,
+                                JOIN_DATE
+                            )[0],
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        ),
+                    /does not match group/,
+                ],
+                [
+                    (habitats: JoinHabitats) =>
+                        joinExchange(
+                            createExchange(
+                                '/ipex/apply',
+                                { m: '', s: 'schema-said', a: {}, i: '' },
+                                habitats.group.prefix,
+                                '',
+                                JOIN_DATE
+                            )[0],
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        ),
+                    /missing recipient/,
+                ],
+                [
+                    (habitats: JoinHabitats) =>
+                        joinExchange(
+                            joinIpex('/ipex/spurn', habitats.group.prefix),
+                            habitats.group.prefix,
+                            habitats.peer.prefix,
+                            habitats.member.prefix
+                        ),
+                    /unsupported embedded/,
+                ],
+            ];
+
+            for (const [exchange, error] of invalid) {
+                const { client, posts } = await createJoinHarness({
+                    exchange,
+                });
+                await expect(
+                    new Ipex(client).join(JOIN_GROUP_NAME, 'outer-said')
+                ).rejects.toThrow(error);
+                assert.equal(posts.length, 0);
+            }
+        },
+        30000
+    );
+
+    it('IPEX join requires another signing member to receive the approval', async () => {
+        await libsodium.ready;
+        const { client, posts } = await createJoinHarness({
+            members: ({ member }) => ({
+                signing: [{ aid: member.prefix }],
+                rotation: [],
+            }),
+        });
+
+        await expect(
+            new Ipex(client).join(JOIN_GROUP_NAME, 'outer-said')
+        ).rejects.toThrow(/no peer signing members/);
+        assert.equal(posts.length, 0);
     });
 });
