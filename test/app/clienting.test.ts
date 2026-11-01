@@ -22,7 +22,7 @@ import {
     HEADER_SIG_INPUT,
     HEADER_SIG_TIME,
 } from '../../src/keri/core/httping.ts';
-import { Tier } from '../../src/keri/core/salter.ts';
+import { Salter, Tier } from '../../src/keri/core/salter.ts';
 import libsodium from 'libsodium-wrappers-sumo';
 import { createMockFetch, mockConnect } from './test-utils.ts';
 
@@ -323,7 +323,10 @@ describe('SignifyClient', () => {
         );
 
         const aid = await client.identifiers().get('aid1');
+        const derive = vitest.spyOn(Salter.prototype, 'signer');
         const keeper = client.manager!.get(aid);
+        expect(derive).not.toHaveBeenCalled();
+        derive.mockRestore();
         const signer = keeper.signers[0];
         const created = lastHeaders
             .get(HEADER_SIG_INPUT)

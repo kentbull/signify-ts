@@ -79,6 +79,19 @@ Typescript source files needs to be transpiled before running scripts or integra
     console.log(actualSignifyClient);
     ```
 
+### Salty signer reuse
+
+Each identifier-manager factory retains up to 16 salty signer sets and reuses
+them when the AID prefix and current derivation inputs match. Every lookup
+returns a fresh manager with fresh signer objects; Randy and external managers
+are unchanged, and group managers benefit only through their local salty
+member.
+
+The cache lives as long as the factory created by `SignifyClient.connect()` and
+does not replace application-level client reuse or coordinate concurrent
+identifier mutations. Cached seed strings cannot be reliably zeroized by the
+JavaScript runtime before garbage collection.
+
 ### Unit testing
 
 To run unit tests

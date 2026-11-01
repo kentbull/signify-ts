@@ -49,6 +49,19 @@ export interface SaltyManagerParams extends IdentifierManagerParams {
     sxlt: string | undefined;
 }
 
+type CachedSaltySigners = Readonly<{
+    derivationKey: string;
+    signerQb64s: readonly string[];
+}>;
+
+const MAX_CACHED_SALTY_SIGNERS = 16;
+
+let hydrateSaltyManager: (
+    salter: Salter,
+    state: SaltyKeyState,
+    signerQb64s: readonly string[]
+) => SaltyIdentifierManager;
+
 export interface RandyManagerParams extends IdentifierManagerParams {
     nxts?: string[];
     prxs?: string[];
@@ -101,6 +114,7 @@ export interface IdentifierManager<
  */
 export class IdentifierManagerFactory {
     private modules: Record<string, ExternalModuleType> = {};
+    private saltySignerCache = new Map<string, CachedSaltySigners>();
 
     /**
      * Creates a factory for generating IdentifierManagers. Requires a salt to be specified.
@@ -191,23 +205,7 @@ export class IdentifierManagerFactory {
      */
     get(aid: HabState): IdentifierManager {
         if (Algos.salty in aid) {
-            return new SaltyIdentifierManager(
-                this.salter,
-                aid.salty.pidx,
-                aid.salty.kidx,
-                aid.salty.tier,
-                aid.salty.transferable,
-                aid.salty.stem,
-                undefined,
-                undefined,
-                aid.salty.icodes,
-                undefined,
-                undefined,
-                aid.salty.ncodes,
-                aid.salty.dcode,
-                undefined,
-                aid.salty.sxlt
-            );
+            return this.getSalty(aid);
         } else if (Algos.randy in aid) {
             return new RandyIdentifierManager(
                 this.salter,
@@ -243,30 +241,119 @@ export class IdentifierManagerFactory {
             throw new Error('No algo specified');
         }
     }
+
+    private getSalty(
+        aid: HabState & { salty: SaltyKeyState }
+    ): SaltyIdentifierManager {
+        const derivationKey = saltySignerDerivationKey(aid.salty);
+        const cached = this.saltySignerCache.get(aid.prefix);
+        if (cached !== undefined && cached.derivationKey === derivationKey) {
+            const manager = hydrateSaltyManager(
+                this.salter,
+                aid.salty,
+                cached.signerQb64s
+            );
+            this.saltySignerCache.delete(aid.prefix);
+            this.saltySignerCache.set(aid.prefix, cached);
+            return manager;
+        }
+
+        const manager = new SaltyIdentifierManager(
+            this.salter,
+            aid.salty.pidx,
+            aid.salty.kidx,
+            aid.salty.tier,
+            aid.salty.transferable,
+            aid.salty.stem,
+            undefined,
+            undefined,
+            aid.salty.icodes,
+            undefined,
+            undefined,
+            aid.salty.ncodes,
+            aid.salty.dcode,
+            undefined,
+            aid.salty.sxlt
+        );
+
+        const entry = Object.freeze({
+            derivationKey,
+            signerQb64s: Object.freeze(
+                manager.signers.map((signer) => signer.qb64)
+            ),
+        });
+        this.saltySignerCache.delete(aid.prefix);
+        this.saltySignerCache.set(aid.prefix, entry);
+        if (this.saltySignerCache.size > MAX_CACHED_SALTY_SIGNERS) {
+            const oldest = this.saltySignerCache.keys().next().value;
+            if (oldest !== undefined) {
+                this.saltySignerCache.delete(oldest);
+            }
+        }
+
+        return manager;
+    }
+}
+
+function saltySignerDerivationKey(state: SaltyKeyState): string {
+    return JSON.stringify([
+        state.sxlt,
+        state.tier,
+        state.stem,
+        state.pidx,
+        state.kidx,
+        state.icodes,
+    ]);
 }
 
 export class SaltyIdentifierManager implements IdentifierManager {
-    private aeid: string;
-    private encrypter: Encrypter;
-    private decrypter: Decrypter;
-    private salter: Salter;
-    private pidx: number;
-    private kidx: number;
-    private tier: Tier;
-    private transferable: boolean;
+    private salter!: Salter;
+    private pidx!: number;
+    private kidx!: number;
+    private tier!: Tier;
+    private transferable!: boolean;
     private stem: string | undefined;
-    private code: string;
-    private count: number;
+    private code!: string;
+    private count!: number;
     private icodes: string[] | undefined;
-    private ncode: string;
-    private ncount: number;
+    private ncode!: string;
+    private ncount!: number;
     private ncodes: string[] | undefined;
     private dcode: string | undefined;
     private sxlt: string | undefined;
     private bran: string | undefined;
-    private creator: SaltyCreator;
-    public algo: Algos = Algos.salty;
-    public signers: Signer[];
+    private creator: SaltyCreator | undefined;
+    public algo!: Algos;
+    public signers!: Signer[];
+
+    static {
+        hydrateSaltyManager = (salter, state, signerQb64s) => {
+            const manager = Object.create(
+                SaltyIdentifierManager.prototype
+            ) as SaltyIdentifierManager;
+            manager.salter = salter;
+            manager.pidx = state.pidx;
+            manager.kidx = state.kidx;
+            manager.tier = state.tier;
+            manager.transferable = state.transferable;
+            manager.stem = state.stem;
+            manager.code = MtrDex.Ed25519_Seed;
+            manager.count = state.icodes.length;
+            manager.icodes = [...state.icodes];
+            manager.ncode = MtrDex.Ed25519_Seed;
+            manager.ncount = state.ncodes.length;
+            manager.ncodes = [...state.ncodes];
+            manager.dcode = state.dcode;
+            manager.sxlt = state.sxlt;
+            manager.bran = undefined;
+            manager.creator = undefined;
+            manager.algo = Algos.salty;
+            manager.signers = signerQb64s.map(
+                (qb64) => new Signer({ qb64, transferable: state.transferable })
+            );
+            return manager;
+        };
+    }
 
     constructor(
         salter: Salter,
@@ -287,22 +374,17 @@ export class SaltyIdentifierManager implements IdentifierManager {
     ) {
         // # Salter is the entered passcode and used for enc/dec of salts for each AID
         this.salter = salter;
-        const signer = this.salter.signer(code, transferable, undefined, tier);
-
-        this.aeid = signer.verfer.qb64;
-
-        this.encrypter = new Encrypter({}, b(this.aeid));
-        this.decrypter = new Decrypter({}, signer.qb64b);
-
         this.code = code;
         this.ncode = ncode;
         this.tier = tier;
         this.icodes =
-            icodes == undefined ? new Array<string>(count).fill(code) : icodes;
+            icodes == undefined
+                ? new Array<string>(count).fill(code)
+                : [...icodes];
         this.ncodes =
             ncodes == undefined
                 ? new Array<string>(ncount).fill(ncode)
-                : ncodes;
+                : [...ncodes];
         this.dcode = dcode;
         this.pidx = pidx;
         this.kidx = kidx;
@@ -310,25 +392,16 @@ export class SaltyIdentifierManager implements IdentifierManager {
         this.count = count;
         this.ncount = ncount;
         this.stem = stem == undefined ? 'signify:aid' : stem;
-
         if (bran != undefined) {
             this.bran = MtrDex.Salt_128 + 'A' + bran!.slice(0, 21);
-            this.creator = new SaltyCreator(this.bran, this.tier, this.stem);
-            this.sxlt = this.encrypter.encrypt(b(this.creator.salt)).qb64;
-        } else if (sxlt == undefined) {
-            this.creator = new SaltyCreator(undefined, this.tier, this.stem);
-            this.sxlt = this.encrypter.encrypt(b(this.creator.salt)).qb64;
         } else {
-            this.sxlt = sxlt;
-            const ciph = new Cipher({ qb64: this.sxlt });
-            this.creator = new SaltyCreator(
-                this.decrypter.decrypt(null, ciph).qb64,
-                tier,
-                this.stem
-            );
+            this.bran = undefined;
         }
+        this.sxlt = sxlt;
+        this.creator = undefined;
+        this.algo = Algos.salty;
 
-        this.signers = this.creator.create(
+        this.signers = this.ensureCreator().create(
             this.icodes,
             this.ncount,
             this.ncode,
@@ -338,6 +411,38 @@ export class SaltyIdentifierManager implements IdentifierManager {
             this.kidx,
             false
         ).signers;
+    }
+
+    private ensureCreator(): SaltyCreator {
+        if (this.creator !== undefined) {
+            return this.creator;
+        }
+
+        const signer = this.salter.signer(
+            this.code,
+            this.transferable,
+            undefined,
+            this.tier
+        );
+        const encrypter = new Encrypter({}, b(signer.verfer.qb64));
+
+        if (this.bran !== undefined) {
+            this.creator = new SaltyCreator(this.bran, this.tier, this.stem);
+            this.sxlt = encrypter.encrypt(b(this.creator.salt)).qb64;
+        } else if (this.sxlt === undefined) {
+            this.creator = new SaltyCreator(undefined, this.tier, this.stem);
+            this.sxlt = encrypter.encrypt(b(this.creator.salt)).qb64;
+        } else {
+            const decrypter = new Decrypter({}, signer.qb64b);
+            const cipher = new Cipher({ qb64: this.sxlt });
+            this.creator = new SaltyCreator(
+                decrypter.decrypt(null, cipher).qb64,
+                this.tier,
+                this.stem
+            );
+        }
+
+        return this.creator;
     }
 
     params(): SaltyManagerParams {
@@ -355,10 +460,11 @@ export class SaltyIdentifierManager implements IdentifierManager {
     }
 
     async incept(transferable: boolean): Promise<IdentifierManagerResult> {
+        const creator = this.ensureCreator();
         this.transferable = transferable;
         this.kidx = 0;
 
-        const signers = this.creator.create(
+        const signers = creator.create(
             this.icodes,
             this.count,
             this.code,
@@ -371,7 +477,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
         this.signers = signers.signers;
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
-        const nsigners = this.creator.create(
+        const nsigners = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,
@@ -393,9 +499,10 @@ export class SaltyIdentifierManager implements IdentifierManager {
         ncodes: string[],
         transferable: boolean
     ): Promise<[string[], string[]]> {
+        const creator = this.ensureCreator();
         this.ncodes = ncodes;
         this.transferable = transferable;
-        const signers = this.creator.create(
+        const signers = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,
@@ -409,7 +516,7 @@ export class SaltyIdentifierManager implements IdentifierManager {
         const verfers = signers.signers.map((signer) => signer.verfer.qb64);
 
         this.kidx = this.kidx! + this.icodes!.length;
-        const nsigners = this.creator.create(
+        const nsigners = creator.create(
             this.ncodes,
             this.ncount,
             this.ncode,

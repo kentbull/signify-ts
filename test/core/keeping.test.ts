@@ -3,11 +3,14 @@ import { assert, describe, expect, it, vitest } from 'vitest';
 import {
     Diger,
     GroupIdentifierManager,
+    HabState,
+    IdentifierManagerFactory,
     MtrDex,
     RandyIdentifierManager,
     Salter,
     SaltyCreator,
     SaltyIdentifierManager,
+    SaltyKeyState,
     Siger,
     Tier,
     b,
@@ -75,6 +78,130 @@ describe('IdentifierManager signing', () => {
             expect(create).not.toHaveBeenCalled();
         } finally {
             create.mockRestore();
+        }
+    });
+
+    it('hydrates fresh managers from cached signer seeds', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const { aid } = await saltyAidFixture(salter);
+        const factory = new IdentifierManagerFactory(salter);
+        const derive = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            const cold = factory.get(aid);
+            const coldCalls = derive.mock.calls.length;
+            const warm = factory.get(aid);
+
+            expect(coldCalls).toBeGreaterThan(0);
+            expect(derive).toHaveBeenCalledTimes(coldCalls);
+            expect(warm).not.toBe(cold);
+            expect(warm.signers[0]).not.toBe(cold.signers[0]);
+            expect(warm.signers[0].raw).not.toBe(cold.signers[0].raw);
+            expect(warm.params().icodes).not.toBe(cold.params().icodes);
+            expect(warm.signers.map((signer) => signer.verfer.qb64)).toEqual(
+                aid.state.k
+            );
+
+            const serialized = b('cached-salty-signers');
+            expect(await warm.sign(serialized)).toEqual(
+                await cold.sign(serialized)
+            );
+        } finally {
+            derive.mockRestore();
+        }
+    });
+
+    it('reuses only matching signer derivation inputs', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const { aid, manager: source } = await saltyAidFixture(salter);
+        const interaction = structuredClone(aid);
+        interaction.state.s = '1';
+        interaction.state.d = 'interaction';
+        interaction.salty.ncodes = [MtrDex.Ed25519_Seed];
+
+        const [rotationKeys] = await source.rotate(
+            [MtrDex.Ed25519_Seed, MtrDex.Ed25519_Seed],
+            true
+        );
+        const rotated = structuredClone(aid);
+        rotated.salty = source.params() as typeof aid.salty;
+        rotated.state.k = rotationKeys;
+
+        const factory = new IdentifierManagerFactory(salter);
+        factory.get(aid);
+        const derive = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            factory.get(interaction);
+            expect(derive).not.toHaveBeenCalled();
+
+            factory.get(rotated);
+            const replacementCalls = derive.mock.calls.length;
+            expect(replacementCalls).toBeGreaterThan(0);
+
+            factory.get(rotated);
+            expect(derive).toHaveBeenCalledTimes(replacementCalls);
+        } finally {
+            derive.mockRestore();
+        }
+    });
+
+    it('bounds cached signer sets to sixteen prefixes', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const { aid } = await saltyAidFixture(salter);
+        const aids = Array.from({ length: 17 }, (_, index) => {
+            const copy = structuredClone(aid);
+            copy.prefix = `aid-${index}`;
+            copy.state.i = copy.prefix;
+            return copy;
+        });
+        const factory = new IdentifierManagerFactory(salter);
+        for (const state of aids) {
+            factory.get(state);
+        }
+
+        const derive = vitest.spyOn(Salter.prototype, 'signer');
+        try {
+            factory.get(aids[16]);
+            expect(derive).not.toHaveBeenCalled();
+
+            factory.get(aids[0]);
+            expect(derive).toHaveBeenCalled();
+        } finally {
+            derive.mockRestore();
+        }
+    });
+
+    it('lazily rotates one hydrated manager without changing another', async () => {
+        await libsodium.ready;
+
+        const salter = new Salter({ raw: b('0123456789abcdef') });
+        const { aid } = await saltyAidFixture(salter);
+        const factory = new IdentifierManagerFactory(salter);
+        factory.get(aid);
+        const rotating = factory.get(aid);
+        const unchanged = factory.get(aid);
+        const serialized = b('isolated-hydrated-manager');
+        const before = await unchanged.sign(serialized);
+        const derive = vitest.spyOn(Salter.prototype, 'signer');
+
+        try {
+            await rotating.rotate([MtrDex.Ed25519_Seed], true);
+            const rotationCalls = derive.mock.calls.length;
+            expect(rotationCalls).toBeGreaterThan(0);
+            expect(await unchanged.sign(serialized)).toEqual(before);
+            expect(derive).toHaveBeenCalledTimes(rotationCalls);
+            expect(rotating.signers[0].verfer.qb64).not.toEqual(
+                unchanged.signers[0].verfer.qb64
+            );
+        } finally {
+            derive.mockRestore();
         }
     });
 
@@ -214,4 +341,59 @@ function groupSigningFixtures() {
         .map((signer) => new Diger({}, signer.verfer.qb64b).qb64);
 
     return { keys, priorNextDigests };
+}
+
+async function saltyAidFixture(
+    salter: Salter,
+    prefix = 'salty-aid'
+): Promise<{
+    aid: HabState & { salty: SaltyKeyState };
+    manager: SaltyIdentifierManager;
+}> {
+    const codes = [MtrDex.Ed25519_Seed, MtrDex.Ed25519_Seed];
+    const manager = new SaltyIdentifierManager(
+        salter,
+        0,
+        0,
+        Tier.low,
+        true,
+        'signify:aid',
+        MtrDex.Ed25519_Seed,
+        codes.length,
+        codes,
+        MtrDex.Ed25519_Seed,
+        codes.length,
+        codes,
+        MtrDex.Blake3_256,
+        '0123456789abcdefghijk'
+    );
+    const [keys, nextDigests] = await manager.incept(true);
+    const aid = {
+        name: prefix,
+        prefix,
+        icp_dt: '2026-08-14T00:00:00.000000+00:00',
+        salty: manager.params(),
+        transferable: true,
+        windexes: [],
+        state: {
+            i: prefix,
+            s: '0',
+            p: '',
+            d: 'inception',
+            f: '0',
+            dt: '2026-08-14T00:00:00.000000+00:00',
+            et: 'icp',
+            kt: '2',
+            k: keys,
+            nt: '2',
+            n: nextDigests,
+            bt: '0',
+            b: [],
+            c: [],
+            ee: { s: '0', d: 'inception' },
+            di: '',
+        },
+    } as HabState & { salty: SaltyKeyState };
+
+    return { aid, manager };
 }
