@@ -182,7 +182,6 @@ test('delegation-multisig', async () => {
                 opList2.map((op) => waitOperation(delegator2Client, op))
             );
 
-            await waitAndMarkNotification(delegator1Client, '/multisig/rpy');
             await waitAndMarkNotification(delegator2Client, '/multisig/rpy');
 
             const [odelegatorGroupName1, odelegatorGroupName2] =
@@ -293,8 +292,6 @@ test('delegation-multisig', async () => {
         ]);
 
         assert.equal(dresult1.response, dresult2.response);
-
-        await waitAndMarkNotification(delegator1Client, '/multisig/ixn');
     });
 
     const queryOp1 = await delegator1Client
@@ -330,6 +327,19 @@ test('delegation-multisig', async () => {
         delegatee1Client,
         delegatee2Client
     );
+    const delegateRequests = [];
+    for (const client of [delegator1Client, delegator2Client]) {
+        const { notes } = await client.notifications().list();
+        for (const note of notes.filter(
+            (note: { r: boolean; a: { r: string } }) =>
+                !note.r && note.a.r === '/delegate/request'
+        )) {
+            delegateRequests.push(note);
+            await markAndRemoveNotification(client, note);
+        }
+    }
+    assert.equal(delegateRequests.length, 1);
+
     await assertNotifications(
         delegator1Client,
         delegator2Client,

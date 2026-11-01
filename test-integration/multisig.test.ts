@@ -18,12 +18,12 @@ import {
 } from 'signify-ts';
 import { resolveEnvironment } from './utils/resolve-env.ts';
 import {
+    assertNotifications,
     assertOperations,
     getOrCreateClient,
     getOrCreateIdentifier,
     waitAndMarkNotification,
     waitOperation,
-    warnNotifications,
 } from './utils/test-util.ts';
 
 const { vleiServerUrl } = resolveEnvironment();
@@ -1153,7 +1153,7 @@ test('multisig', async function run() {
     console.log(`Holder holds ${creds.length} credential`);
 
     await assertOperations(client1, client2, client3, client4);
-    await warnNotifications(client1, client2, client3, client4);
+    await assertNotifications(client1, client2, client3, client4);
 
     console.log('Revoking credential...');
     const REVTIME = new Date().toISOString().replace('Z', '000+00:00');
